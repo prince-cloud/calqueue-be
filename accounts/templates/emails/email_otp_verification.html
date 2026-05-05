@@ -1,0 +1,22 @@
+{% extends "base_email.html" %}
+
+{% block email_title %}Email Verification OTP{% endblock %}
+
+{% block email_content %}
+<h2>Verify Your Email Address</h2>
+<p>Hello,</p>
+<p>Thank you for signing up! To complete your registration, please verify your email address using the OTP code below:</p>
+
+<div class="otp-container">
+    <div class="otp-label">Your Verification Code</div>
+    <div class="otp-code">{{ otp }}</div>
+    <p style="color: #64748b; font-size: 14px; margin-top: 15px;">This code will expire in 4 minutes.</p>
+</div>
+
+<p>If you didn't request this verification code, you can safely ignore this email.</p>
+
+<div class="info-box">
+    <p><strong>Security Tip:</strong> Never share your OTP code with anyone. Our team will never ask for your verification code.</p>
+</div>
+{% endblock %}
+

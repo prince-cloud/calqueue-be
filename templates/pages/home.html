@@ -1,0 +1,261 @@
+{% extends '_base.html' %}
+{% load static %}
+
+{% block title %}Home page{% endblock title %}
+
+{% block css %}
+{{ block.super }}
+<style>
+  :root {
+    --tech-primary: #6366f1;
+    --tech-secondary: #8b5cf6;
+    --tech-accent: #06b6d4;
+    --tech-dark: #0f172a;
+    --tech-dark-light: #1e293b;
+    --tech-text: #e2e8f0;
+    --tech-text-muted: #94a3b8;
+  }
+
+  .tech-hero {
+    min-height: 80vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--tech-dark) 0%, var(--tech-dark-light) 100%);
+    position: relative;
+    overflow: hidden;
+    padding: 4rem 0;
+  }
+
+  .tech-hero::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: 
+      radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+      radial-gradient(circle at 40% 20%, rgba(6, 182, 212, 0.1) 0%, transparent 50%);
+    animation: pulse 8s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+  }
+
+  .tech-logo {
+    max-height: 120px;
+    filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.3));
+    transition: transform 0.3s ease;
+    position: relative;
+    z-index: 1;
+  }
+
+  .tech-logo:hover {
+    transform: scale(1.05);
+  }
+
+  .tech-title {
+    font-size: 3.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--tech-primary) 0%, var(--tech-accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 2rem 0 1rem;
+    position: relative;
+    z-index: 1;
+    letter-spacing: -0.02em;
+  }
+
+  .tech-subtitle {
+    font-size: 1.25rem;
+    color: var(--tech-text-muted);
+    margin-bottom: 3rem;
+    position: relative;
+    z-index: 1;
+  }
+
+  .tech-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
+    max-width: 900px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+  }
+
+  .tech-card {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 16px;
+    padding: 2.5rem;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .tech-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--tech-primary), var(--tech-accent), var(--tech-secondary));
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.4s ease;
+  }
+
+  .tech-card:hover {
+    transform: translateY(-8px);
+    border-color: rgba(99, 102, 241, 0.5);
+    box-shadow: 
+      0 20px 40px rgba(0, 0, 0, 0.3),
+      0 0 40px rgba(99, 102, 241, 0.2);
+  }
+
+  .tech-card:hover::before {
+    transform: scaleX(1);
+  }
+
+  .tech-card-icon {
+    font-size: 3rem;
+    margin-bottom: 1.5rem;
+    display: block;
+    filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.5));
+  }
+
+  .tech-card-title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: var(--tech-text);
+    margin-bottom: 1rem;
+  }
+
+  .tech-card-text {
+    color: var(--tech-text-muted);
+    line-height: 1.6;
+    margin-bottom: 2rem;
+  }
+
+  .tech-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.875rem 2rem;
+    font-size: 1rem;
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    border: none;
+  }
+
+  .tech-btn-primary {
+    background: linear-gradient(135deg, var(--tech-primary) 0%, var(--tech-secondary) 100%);
+    color: white;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+  }
+
+  .tech-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6);
+    color: white;
+  }
+
+  .tech-btn-secondary {
+    background: transparent;
+    color: var(--tech-accent);
+    border: 2px solid var(--tech-accent);
+  }
+
+  .tech-btn-secondary:hover {
+    background: var(--tech-accent);
+    color: var(--tech-dark);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(6, 182, 212, 0.4);
+  }
+
+  .tech-btn::after {
+    content: '→';
+    margin-left: 0.5rem;
+    transition: transform 0.3s ease;
+  }
+
+  .tech-btn:hover::after {
+    transform: translateX(4px);
+  }
+
+  @media (max-width: 768px) {
+    .tech-title {
+      font-size: 2.5rem;
+    }
+    
+    .tech-cards {
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+    }
+    
+    .tech-card {
+      padding: 2rem;
+    }
+  }
+
+  /* Animated grid background */
+  .tech-grid {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    opacity: 0.05;
+    background-image: 
+      linear-gradient(rgba(99, 102, 241, 0.1) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99, 102, 241, 0.1) 1px, transparent 1px);
+    background-size: 50px 50px;
+    animation: gridMove 20s linear infinite;
+  }
+
+  @keyframes gridMove {
+    0% { transform: translate(0, 0); }
+    100% { transform: translate(50px, 50px); }
+  }
+</style>
+{% endblock css %}
+
+{% block content %}
+<div class="tech-hero">
+  <div class="tech-grid"></div>
+  <div class="container text-center">
+    <h1 class="tech-title">Welcome to Base</h1>
+    <p class="tech-subtitle">Your Django development platform is ready. Choose your destination below.</p>
+    
+    <div class="tech-cards">
+      <div class="tech-card">
+        <span class="tech-card-icon">⚙️</span>
+        <h3 class="tech-card-title">Backend Center</h3>
+        <p class="tech-card-text">Access the admin dashboard to manage your system, users, and configurations with full control.</p>
+        <a href="{% url 'admin:index' %}" class="tech-btn tech-btn-primary">Go to Admin</a>
+      </div>
+
+      <div class="tech-card">
+        <span class="tech-card-icon">📚</span>
+        <h3 class="tech-card-title">API Documentation</h3>
+        <p class="tech-card-text">Explore the complete API specification, endpoints, and interactive documentation for your services.</p>
+        <a href="{% url 'swagger-ui' %}" class="tech-btn tech-btn-secondary">View Docs</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock content %}

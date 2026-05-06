@@ -4,11 +4,8 @@ from rest_framework.response import Response
 from rest_framework.generics import CreateAPIView, GenericAPIView
 from rest_framework import permissions as rest_permissions
 from django.utils.translation import gettext_lazy as _
-from allauth.socialaccount.providers.apple.views import AppleOAuth2Adapter
-from dj_rest_auth.registration.views import SocialLoginView
 from dj_rest_auth.utils import jwt_encode
 from .models import CustomUser, UserID, UserAddress
-from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from helpers import exceptions
 from django.db import transaction
 from django.conf import settings
@@ -18,6 +15,8 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
 from django.core.cache import cache
 from django.utils import timezone
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 from loguru import logger
 
 
@@ -65,59 +64,19 @@ class SignUpViewset(CreateAPIView, DJREST_LoginView):
         return response
 
 
-class CustomGoogleLoginView(GenericAPIView):
-    """
-    Custom Google OAuth2 Login View
-
-    this view takes the authorization code and a request is being to exchange the
-    id_token from google the id token si then being used to fetch the user data
-    from gooogle.
-    """
-
-    serializer_class = serializers.CustomGoogleOauthLoginSerializer
+class LogoutView(APIView):
+    permission_classes = (rest_permissions.IsAuthenticated,)
 
     def post(self, request):
-        serializer: serializers.GoogleOauthLoginSerializer = self.get_serializer(
-            data=request.data
-        )
-        serializer.is_valid(raise_exception=True)
-        user_email = serializer.data["auth_code"]
-        user = CustomUser.objects.get(email=user_email)
-        access_token, refresh_token = jwt_encode(user)
-        response = {
-            "access": str(access_token),
-            "refresh": str(refresh_token),
-        }
-        response["user"] = serializers.UserSerializer(
-            instance=user,
-            many=False,
-            context=self.get_serializer_context(),
-        ).data
-
-        # try:
-        #     send_account_creation_success_email(
-        #         user_email=user.email,
-        #         user_name=user.first_name,
-        #     )
-        #     send_new_account_notification(
-        #         admin_email="acheampongprince227@gmail.com",
-        #         user_name=user.fullname,
-        #         user_email=user.email,
-        #     )
-        # except Exception as e:
-        #     print("== error sending email: ", e)
-        return Response(data=response, status=status.HTTP_200_OK)
-
-
-class AppleLoginView(SocialLoginView):
-    # if you want to use Authorization Code Grant, use this
-    """
-    This view allows users to use oauth login to Google and would be authenticated.
-    """
-
-    adapter_class = AppleOAuth2Adapter
-    # callback_url = "CALLBACK_URL_ON_GOOGLE"  # TODO: fix this
-    client_class = OAuth2Client
+        refresh_token = request.data.get("refresh")
+        if not refresh_token:
+            raise exceptions.GeneralException(detail="Refresh token is required.")
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        except TokenError:
+            raise exceptions.InvalidToken()
+        return Response({"message": "Successfully logged out."}, status=status.HTTP_200_OK)
 
 
 class ResetPasswordOtpView(CreateAPIView):

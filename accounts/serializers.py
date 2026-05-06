@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from accounts.oauth import google, register_social_user
 from .models import CustomUser, UserID, UserAddress
 from dj_rest_auth.serializers import LoginSerializer
 from datetime import datetime, timedelta
@@ -224,23 +223,6 @@ class CustomLoginSerializer(LoginSerializer):
         cache.delete(f"login-attempt/{username}")
         attrs = super().validate(attrs)
         return attrs
-
-
-class CustomGoogleOauthLoginSerializer(serializers.Serializer):
-    auth_code = serializers.CharField(required=True)
-
-    def validate_auth_code(self, auth_code):
-        # id_token = google.Google.get_id_token(auth_code)
-        user_data = google.Google.validate(auth_code)
-
-        try:
-            user_data["sub"]
-        except Exception:
-            raise serializers.ValidationError(
-                "The token is invalid or expired. Please login again."
-            )
-
-        return register_social_user.register_google_user(data=user_data)
 
 
 class ResetPasswordOtpSerializer(serializers.Serializer):

@@ -43,7 +43,6 @@ INSTALLED_APPS = [
     "unfold.contrib.import_export",  # optional, if django-import-export package is used
     "unfold.contrib.guardian",  # optional, if django-guardian package is used
     "unfold.contrib.simple_history",  # optional, if django-simple-history package is used
-    # "jazzmin",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -52,30 +51,29 @@ INSTALLED_APPS = [
     "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
     "django.contrib.sites",
-    "oauth2_provider",
     # Third-party
     "allauth",
     "allauth.account",
-    "allauth.socialaccount",
     "corsheaders",
     "crispy_forms",
     "crispy_bootstrap5",
     "debug_toolbar",
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "django_filters",
     "drf_spectacular",
     "import_export",
+    "auditlog",
     "dj_rest_auth",
     "rest_framework.authtoken",
     "phonenumber_field",
     "drf_yasg",
     "django_celery_beat",
-    "allauth.socialaccount.providers.google",
-    "allauth.socialaccount.providers.apple",
     "storages",
     # Local
     "accounts",
+    "configuration",
 ]
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware
@@ -87,7 +85,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "debug_toolbar.middleware.DebugToolbarMiddleware",  # Django Debug Toolbar
-    # "django.middleware.csrf.CsrfViewMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -157,7 +155,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-CORS_ORIGIN_ALLOW_ALL = True
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 # Internationalization
@@ -265,8 +262,28 @@ ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*"]
 
-# X_FRAME_OPTIONS = "ALLOW"
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    value.strip()
+    for value in os.getenv(
+        "CORS_ALLOWED_ORIGINS", default="http://localhost:8080,http://127.0.0.1:8080"
+    ).split(",")
+]
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "authorization",
+    "content-type",
+    "x-csrftoken",
+    "x-requested-with",
+]
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
 
 # PHONENUMBER_DEFAULT_REGION = "ST"
 # PHONENUMBER_DB_FORMAT = "NATIONAL"
@@ -310,7 +327,6 @@ SPECTACULAR_SETTINGS = {
     # OTHER SETTINGS
 }
 
-THROTTLE_RATE = os.getenv("THROTTLE_RATE", "100/s")
 REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 64,
@@ -318,11 +334,16 @@ REST_FRAMEWORK = {
     "NON_FIELD_ERRORS_KEY": "error",
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "configuration.authentication.DeviceJWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
-        # "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
     ),
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
     "DEFAULT_THROTTLE_RATES": {
-        "apis": THROTTLE_RATE,
+        "anon": os.getenv("ANON_THROTTLE_RATE", "60/minute"),
+        "user": os.getenv("USER_THROTTLE_RATE", "200/minute"),
     },
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -331,17 +352,13 @@ REST_FRAMEWORK = {
     ],
     "EXCEPTION_HANDLER": "config.exceptions.custom_exception_handler",
 }
-REST_USE_JWT = True
 
-JWT_AUTH_COOKIE = "authentication-auth"
-
-JWT_AUTH_REFRESH_COOKIE = "authentication-refresh-token"
-
-JWT_AUTH_RETURN_EXPIRATION = True
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=3),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "UPDATE_LAST_LOGIN": False,
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "UPDATE_LAST_LOGIN": True,
     "ALGORITHM": "HS256",
     "AUTH_HEADER_TYPES": ("Bearer",),
     "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
@@ -401,7 +418,6 @@ CHANNEL_LAYERS = {
         },
     },
 }
-THROTTLE_RATE = os.getenv("THROTTLE_RATE", "100/s")
 
 # CELERY
 CELERY_ACCEPT_CONTENT = ["application/json"]
@@ -453,8 +469,17 @@ UNFOLD = {
 }
 
 
-# allow all headers
-CORS_ALLOW_HEADERS = "*"
+# SECURITY HEADERS — enforced in production only
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    X_FRAME_OPTIONS = "DENY"
 
 # PAYSTACK
 PAYSTACK_PRIVATE_KEY = os.getenv("PAYSTACK_PRIVATE_KEY", default="")

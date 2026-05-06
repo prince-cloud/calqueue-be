@@ -7,17 +7,12 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 from django.conf.urls.static import static
-from accounts.views import CustomGoogleLoginView, AppleLoginView
-
-
 urlpatterns = [
     path("bknd-ctr/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
     path("", include("pages.urls")),
     path("auth/", include("accounts.urls")),
-    path("oauth/google-login/", CustomGoogleLoginView.as_view(), name="google_login"),
-    path("oauth/apple-login/", AppleLoginView.as_view(), name="apple_login"),
-    path("oauth/", include("oauth2_provider.urls", namespace="oauth2_provider")),
+    path("configuration/", include("configuration.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "api/docs/",

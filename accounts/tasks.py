@@ -8,7 +8,9 @@ from typing import Dict
 
 
 @shared_task
-def generic_send_mail(recipient, title, template_type="email_otp_verification", payload: Dict = None):
+def generic_send_mail(
+    recipient, title, template_type="email_otp_verification", payload: Dict = None
+):
     """
     Send generic email using specified template type.
 
@@ -20,9 +22,11 @@ def generic_send_mail(recipient, title, template_type="email_otp_verification", 
     """
     if payload is None:
         payload = {}
-    
+
     env = Environment(
-        loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates", "emails"))
+        loader=FileSystemLoader(
+            os.path.join(os.path.dirname(__file__), "templates", "emails")
+        )
     )
 
     # Map template types to template files
@@ -31,7 +35,7 @@ def generic_send_mail(recipient, title, template_type="email_otp_verification", 
         "password_reset_otp": "password_reset_otp.html",
         "password_changed": "password_changed.html",
     }
-    
+
     template_file = template_map.get(template_type, "email_otp_verification.html")
     template = env.get_template(template_file)
 
@@ -59,24 +63,20 @@ def generic_send_mail(recipient, title, template_type="email_otp_verification", 
 
 @shared_task
 def generic_send_sms(to, body):
-    # return ""
-    url = "https://apps.mnotify.net/smsapi"
-    sender_id = settings.MNOTIFY_SENDER_ID
-    api_key = settings.MNOTIFY_API_KEY
-
-    params = {
-        "key": api_key,
-        "to": to,
-        "msg": body,
-        "sender_id": sender_id,
+    url = f"https://api.mnotify.com/api/sms/quick?key={settings.MNOTIFY_API_KEY}"
+    payload = {
+        "recipient": [to],
+        "sender": settings.MNOTIFY_SENDER_ID,
+        "message": body,
+        "is_schedule": "False",
+        "schedule_date": "",
     }
-
     try:
-        response = requests.post(url, params=params)
-        logger.info(f"Response: {response.text}")
+        response = requests.post(url, json=payload)
+        logger.info(f"mnotify Response: {response.text}")
         response.raise_for_status()
-        logger.info("Message sent successfully!")
-        return response.json()  # Assuming API returns JSON
+        logger.info("Message sent successfully via mnotify!")
+        return response.json()
     except requests.RequestException as e:
-        logger.error(f"An error occurred sending otp {e}")
+        logger.error(f"An error occurred sending SMS via mnotify: {e}")
         return {"status": "error", "message": str(e)}

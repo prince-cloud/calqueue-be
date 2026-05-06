@@ -5,6 +5,7 @@ from django.utils.translation import gettext_lazy as _
 import uuid
 from django.utils import timezone
 from django.core.cache import cache
+from auditlog.registry import auditlog
 
 
 class CustomUser(AbstractUser):
@@ -28,8 +29,7 @@ class CustomUser(AbstractUser):
         return "{}:{}".format(self.fullname, self.phone_number)
 
     def save(self, *args, **kwargs):
-        if not self.fullname:
-            self.fullname = self.get_full_name()
+        self.fullname = self.get_full_name()
 
         if not self.username:
             self.username = self.phone_number
@@ -40,6 +40,9 @@ class CustomUser(AbstractUser):
 
     def can_update(self):
         return self.last_updated <= timezone.now() - timezone.timedelta(days=90)
+
+
+auditlog.register(CustomUser, exclude_fields=["password", "last_login"])
 
 
 class UserID(models.Model):
@@ -94,7 +97,9 @@ class UserAddress(models.Model):
     def __str__(self):
         return self.user.fullname
 
-    # add an action can update which checks the lats updated
-    # for the past 3 months
     def can_update(self):
         return self.last_updated <= timezone.now() - timezone.timedelta(days=90)
+
+
+auditlog.register(UserID)
+auditlog.register(UserAddress)

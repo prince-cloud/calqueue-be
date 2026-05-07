@@ -12,7 +12,7 @@ class UserAdmin(UserAdmin, ModelAdmin):
     change_password_form = AdminPasswordChangeForm
     readonly_fields = ("fcm_app_token", "uuid")
     list_display = [
-        "id",
+        "uuid",
         "fullname",
         "phone_number",
         "email",
@@ -40,17 +40,18 @@ class UserAdmin(UserAdmin, ModelAdmin):
 @admin.register(models.UserID)
 class UserIDAdmin(ModelAdmin):
     list_display = [
-        "id",
+        "uuid",
         "user",
         "id_type",
         "id_number",
     ]
+    readonly_fields = ("uuid", "date_created", "last_updated")
 
 
 @admin.register(models.UserAddress)
 class UserAddressAdmin(ModelAdmin):
     list_display = [
-        "id",
+        "uuid",
         "user",
         "gps_address",
         "address",
@@ -58,3 +59,4 @@ class UserAddressAdmin(ModelAdmin):
         "city",
         "region",
     ]
+    readonly_fields = ("uuid", "date_created", "last_updated")

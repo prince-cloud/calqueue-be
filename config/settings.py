@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     # Local
     "accounts",
     "configuration",
+    "core",
 ]
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware

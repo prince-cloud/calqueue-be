@@ -22,7 +22,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
         fields = (
-            "id",
+            "uuid",
             "email",
             "phone_number",
             "first_name",
@@ -366,7 +366,7 @@ class UserIDSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserID
         fields = (
-            "id",
+            "uuid",
             "id_type",
             "id_number",
             "id_front_image",
@@ -375,7 +375,7 @@ class UserIDSerializer(serializers.ModelSerializer):
             "last_updated",
             "can_update",
         )
-        read_only_fields = ("id", "date_created", "last_updated")
+        read_only_fields = ("uuid", "date_created", "last_updated")
 
     def get_can_update(self, obj):
         return obj.can_update() if obj else True
@@ -395,7 +395,7 @@ class UserAddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserAddress
         fields = (
-            "id",
+            "uuid",
             "gps_address",
             "address",
             "nearest_landmark",
@@ -405,7 +405,7 @@ class UserAddressSerializer(serializers.ModelSerializer):
             "last_updated",
             "can_update",
         )
-        read_only_fields = ("id", "date_created", "last_updated")
+        read_only_fields = ("uuid", "date_created", "last_updated")
 
     def get_can_update(self, obj):
         return obj.can_update() if obj else True
@@ -549,7 +549,7 @@ class ProfilePictureSerializer(serializers.ModelSerializer):
             # Check if phone number is already used by another user
             existing_user = (
                 CustomUser.objects.filter(phone_number=phone_number)
-                .exclude(id=self.instance.id if self.instance else None)
+                .exclude(pk=self.instance.pk if self.instance else None)
                 .first()
             )
             if existing_user:

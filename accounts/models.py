@@ -2,7 +2,7 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from phonenumber_field.modelfields import PhoneNumberField
 from django.utils.translation import gettext_lazy as _
-import uuid
+from uuid import uuid4
 from django.utils import timezone
 from django.core.cache import cache
 from auditlog.registry import auditlog
@@ -21,7 +21,7 @@ class CustomUser(AbstractUser):
     fcm_app_token = models.CharField(max_length=240, null=True, blank=True)
 
     # OTHER INFO
-    uuid = models.UUIDField(unique=True, blank=True, null=True, default=uuid.uuid4)
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     deactivated_account = models.BooleanField(default=False)
     last_updated = models.DateTimeField(auto_now=True)
 
@@ -35,7 +35,7 @@ class CustomUser(AbstractUser):
             self.username = self.phone_number
 
         # clear cached for object
-        cache.delete(f"user_profile_{self.id}")
+        cache.delete(f"user_profile_{self.uuid}")
         return super().save(*args, **kwargs)
 
     def can_update(self):
@@ -46,6 +46,8 @@ auditlog.register(CustomUser, exclude_fields=["password", "last_login"])
 
 
 class UserID(models.Model):
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+
     class IDType(models.TextChoices):
         GHANA_CARD = "Ghana Card"
         DRIVING_LICENSE = "Driving License"
@@ -80,6 +82,7 @@ class UserID(models.Model):
 
 
 class UserAddress(models.Model):
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     user = models.OneToOneField(
         CustomUser,
         on_delete=models.CASCADE,

@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.core.cache import cache
 from django.utils import timezone
 from helpers import exceptions
-from .models import Branch, BranchWorkingHours, Device
+from .models import Branch, BranchWorkingHours, Device, MainService, Service
 
 
 class BranchWorkingHoursSerializer(serializers.ModelSerializer):
@@ -18,7 +18,15 @@ class BranchSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Branch
-        fields = ("id", "name", "code", "location", "latitude", "longitude", "working_hours")
+        fields = (
+            "uuid",
+            "name",
+            "code",
+            "location",
+            "latitude",
+            "longitude",
+            "working_hours",
+        )
 
 
 class DeviceSerializer(serializers.ModelSerializer):
@@ -26,7 +34,15 @@ class DeviceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Device
-        fields = ("username", "device_id", "serial_number", "label", "branch", "last_login")
+        fields = (
+            "uuid",
+            "username",
+            "device_id",
+            "serial_number",
+            "label",
+            "branch",
+            "last_login",
+        )
 
 
 class DeviceLoginSerializer(serializers.Serializer):
@@ -45,8 +61,7 @@ class DeviceLoginSerializer(serializers.Serializer):
 
         try:
             device = Device.objects.select_related("branch").get(
-                username=username,
-                is_active=True,
+                username=username, is_active=True
             )
         except Device.DoesNotExist:
             raise exceptions.LoginException()
@@ -55,7 +70,6 @@ class DeviceLoginSerializer(serializers.Serializer):
             raise exceptions.LoginException()
 
         cache.delete(attempt_key)
-
         device.last_login = timezone.now()
         device.save(update_fields=["last_login"])
 
@@ -65,3 +79,17 @@ class DeviceLoginSerializer(serializers.Serializer):
 
 class DeviceRefreshSerializer(serializers.Serializer):
     refresh = serializers.CharField()
+
+
+class ServiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Service
+        fields = ("uuid", "name", "icon", "description", "is_active")
+
+
+class MainServiceSerializer(serializers.ModelSerializer):
+    services = ServiceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = MainService
+        fields = ("uuid", "name", "icon", "description", "is_active", "services")

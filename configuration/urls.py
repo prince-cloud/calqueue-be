@@ -6,6 +6,8 @@ from . import views
 app_name = "configuration"
 
 router = DefaultRouter()
+router.register("branches", views.BranchViewSet, basename="branch")
+router.register("devices", views.DeviceViewSet, basename="device")
 router.register("main-services", views.MainServiceViewSet, basename="main-service")
 router.register("services", views.ServiceViewSet, basename="service")
 

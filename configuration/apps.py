@@ -6,4 +6,4 @@ class ConfigurationConfig(AppConfig):
     name = "configuration"
 
     def ready(self):
-        import configuration.models  # noqa: F401 — triggers auditlog.register() calls
+        import configuration.models  # noqa: F401 — triggers audit registry signal connections

@@ -6,4 +6,4 @@ class AccountsConfig(AppConfig):
     name = 'accounts'
 
     def ready(self):
-        import accounts.models  # noqa: F401 — triggers auditlog.register() calls
+        import accounts.models  # noqa: F401 — triggers audit registry signal connections

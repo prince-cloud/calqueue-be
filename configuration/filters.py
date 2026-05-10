@@ -1,5 +1,17 @@
 import django_filters
-from .models import MainService, Service
+from .models import Branch, Device, MainService, Service
+
+
+class BranchFilter(django_filters.FilterSet):
+    class Meta:
+        model = Branch
+        fields = ("is_active",)
+
+
+class DeviceFilter(django_filters.FilterSet):
+    class Meta:
+        model = Device
+        fields = ("is_active", "branch")
 
 
 class MainServiceFilter(django_filters.FilterSet):

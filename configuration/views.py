@@ -8,15 +8,19 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework_simplejwt.exceptions import TokenError
 
 from helpers import exceptions
-from .filters import MainServiceFilter, ServiceFilter
-from .models import Device, MainService, Service
+from .filters import BranchFilter, DeviceFilter, MainServiceFilter, ServiceFilter
+from .models import Branch, Device, MainService, Service
 from .permissions import IsDevice
 from .serializers import (
+    BranchSerializer,
+    BranchWriteSerializer,
     DeviceLoginSerializer,
     DeviceRefreshSerializer,
     DeviceSerializer,
+    DeviceWriteSerializer,
     MainServiceSerializer,
     ServiceSerializer,
+    ServiceWriteSerializer,
 )
 from .tokens import DeviceRefreshToken
 
@@ -91,6 +95,60 @@ class DeviceProfileView(APIView):
         return Response(DeviceSerializer(request.user).data)
 
 
+class BranchViewSet(ModelViewSet):
+    queryset = Branch.objects.prefetch_related("working_hours").order_by("name")
+    filterset_class = BranchFilter
+    search_fields = ("name", "code", "location")
+    ordering_fields = ("name", "created_at")
+    lookup_field = "uuid"
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return BranchWriteSerializer
+        return BranchSerializer
+
+    def create(self, request, *args, **kwargs):
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(BranchSerializer(instance).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        write_serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(BranchSerializer(instance).data)
+
+
+class DeviceViewSet(ModelViewSet):
+    queryset = Device.objects.select_related("branch").order_by("branch", "label")
+    filterset_class = DeviceFilter
+    search_fields = ("username", "serial_number", "label")
+    ordering_fields = ("label", "created_at")
+    lookup_field = "uuid"
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return DeviceWriteSerializer
+        return DeviceSerializer
+
+    def create(self, request, *args, **kwargs):
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(DeviceSerializer(instance).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        write_serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(DeviceSerializer(instance).data)
+
+
 class MainServiceViewSet(ModelViewSet):
     queryset = (
         MainService.objects.filter(is_active=True)
@@ -110,8 +168,26 @@ class ServiceViewSet(ModelViewSet):
         .select_related("main_service")
         .order_by("name")
     )
-    serializer_class = ServiceSerializer
     filterset_class = ServiceFilter
     search_fields = ("name",)
     ordering_fields = ("name", "created_at")
     lookup_field = "uuid"
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return ServiceWriteSerializer
+        return ServiceSerializer
+
+    def create(self, request, *args, **kwargs):
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(ServiceSerializer(instance).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        write_serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(ServiceSerializer(instance).data)

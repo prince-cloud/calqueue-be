@@ -21,7 +21,6 @@ diff-match-patch==20241021
 dj-rest-auth==7.2.0
 Django==6.0.4
 django-allauth==65.16.0
-django-auditlog==3.0.0
 django-celery-beat==2.9.0
 django-cors-headers==4.9.0
 django-crispy-forms==2.6

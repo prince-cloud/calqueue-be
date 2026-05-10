@@ -5,7 +5,7 @@ from django.utils.translation import gettext_lazy as _
 from uuid import uuid4
 from django.utils import timezone
 from django.core.cache import cache
-from auditlog.registry import auditlog
+from audit.registry import auditlog
 
 
 class CustomUser(AbstractUser):
@@ -26,7 +26,7 @@ class CustomUser(AbstractUser):
     last_updated = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return "{}:{}".format(self.fullname, self.phone_number)
+        return "{}:{}".format(self.fullname, self.email)
 
     def save(self, *args, **kwargs):
         self.fullname = self.get_full_name()

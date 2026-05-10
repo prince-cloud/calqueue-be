@@ -2,7 +2,7 @@ import uuid as _uuid
 from uuid import uuid4
 from django.db import models
 from django.core.exceptions import ValidationError
-from auditlog.registry import auditlog
+from audit.registry import auditlog
 
 
 # ---------------------------------------------------------------------------

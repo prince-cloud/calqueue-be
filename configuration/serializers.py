@@ -45,6 +45,34 @@ class DeviceSerializer(serializers.ModelSerializer):
         )
 
 
+class BranchWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Branch
+        fields = ("name", "code", "location", "latitude", "longitude", "is_active")
+
+
+class DeviceWriteSerializer(serializers.ModelSerializer):
+    branch = serializers.SlugRelatedField(
+        slug_field="uuid", queryset=Branch.objects.all()
+    )
+    password = serializers.CharField(required=False)
+
+    class Meta:
+        model = Device
+        fields = ("username", "password", "serial_number", "label", "branch", "is_active")
+
+    def validate(self, attrs):
+        if self.instance is None and not attrs.get("password"):
+            raise serializers.ValidationError({"password": "Password is required."})
+        return attrs
+
+    def update(self, instance, validated_data):
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
+
+
 class DeviceLoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
@@ -85,6 +113,16 @@ class ServiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Service
         fields = ("uuid", "name", "icon", "description", "is_active")
+
+
+class ServiceWriteSerializer(serializers.ModelSerializer):
+    main_service = serializers.SlugRelatedField(
+        slug_field="uuid", queryset=MainService.objects.all()
+    )
+
+    class Meta:
+        model = Service
+        fields = ("name", "main_service", "icon", "description", "is_active")
 
 
 class MainServiceSerializer(serializers.ModelSerializer):

@@ -64,7 +64,6 @@ INSTALLED_APPS = [
     "django_filters",
     "drf_spectacular",
     "import_export",
-    "auditlog",
     "dj_rest_auth",
     "rest_framework.authtoken",
     "phonenumber_field",
@@ -75,6 +74,7 @@ INSTALLED_APPS = [
     "accounts",
     "configuration",
     "core",
+    "audit",
 ]
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware
@@ -91,6 +91,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",  # django-allauth
+    "audit.middleware.APILogMiddleware",
 ]
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#root-urlconf

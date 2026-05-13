@@ -1,112 +1,164 @@
 from uuid import uuid4
-from django.db import models, transaction
-from django.utils import timezone
-from configuration.models import Branch, Device, Service
+
+from django.core.exceptions import ValidationError
+from django.db import models
+
+from configuration.models import Branch, Counter, Device, Service
 
 
 # ---------------------------------------------------------------------------
-# Ticket Modeling
+# Ticket (one queue position; multiple catalogue services via TicketService)
 # ---------------------------------------------------------------------------
-# class TicketStatus(models.Model):
-#     WAITING = "Waiting"
-#     ON_GOING = "On Going"
-#     ON_HOLD = "On Hold"
-#     COMPLETED = "Completed"
-#     CANCLLED = "Cancelled"
-#     SKIPPED = "Skipped"
 
 
-# class Ticket(models.Model):
+class TicketStatus(models.TextChoices):
+    WAITING = "WAITING", "Waiting"
+    ON_GOING = "ON_GOING", "On going"
+    ON_HOLD = "ON_HOLD", "On hold"
+    COMPLETED = "COMPLETED", "Completed"
+    CANCELLED = "CANCELLED", "Cancelled"
+    SKIPPED = "SKIPPED", "Skipped"
 
-#     branch = models.ForeignKey(
-#         Branch,
-#         related_name="tickets",
-#         null=True,
-#         on_delete=models.SET_NULL,
-#     )
-#     assigned_to = models.ForeignKey(
-#         CustomUser,
-#         related_name="tickets_assigned",
-#         null=True,
-#         on_delete=models.SET_NULL,
-#     )
-#     customer = models.ForeignKey(
-#         Customer,
-#         on_delete=models.SET_NULL,
-#         null=True,
-#         related_name="tickets",
-#     )
 
-#     ticket_number = models.CharField(max_length=20)
+class Ticket(models.Model):
+    """
+    Single queue token for a visit. Tellers serve the ticket as a unit; related
+    rows on TicketService describe which catalogue services are bundled.
+    """
 
-#     ticket_audio = models.FileField(upload_to="ticket_audio/", null=True, blank=True)
-#     signature = models.ImageField(upload_to="ticket_signatures/", null=True, blank=True)
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    ticket_number = models.CharField(max_length=20, db_index=True)
 
-#     waiting_time = models.PositiveIntegerField(
-#         null=True,
-#         blank=True,
-#         help_text="Waiting time (in seconds)",
-#         default=0,
-#     )
-#     called_time = models.DateTimeField(
-#         null=True,
-#         blank=True,
-#         help_text="Time ticket was called",
-#     )
-#     start_serve_time = models.DateTimeField(
-#         null=True,
-#         blank=True,
-#         help_text="Time ticket was started to be served",
-#     )
-#     served_time = models.PositiveIntegerField(
-#         null=True,
-#         blank=True,
-#         help_text="Serving time (in seconds)",
-#         default=0,
-#     )
-#     total_time_spent = models.PositiveIntegerField(
-#         null=True,
-#         blank=True,
-#         help_text="Total Time spent at branch (in seconds)",
-#         default=0,
-#     )
+    branch = models.ForeignKey(
+        Branch,
+        related_name="tickets",
+        on_delete=models.PROTECT,
+    )
+    device = models.ForeignKey(
+        Device,
+        related_name="tickets_created",
+        on_delete=models.PROTECT,
+        help_text="Kiosk / device that issued the ticket.",
+    )
 
-#     counter = models.ForeignKey(
-#         Counter,
-#         related_name="tickets_served",
-#         on_delete=models.SET_NULL,
-#         null=True,
-#         blank=True,
-#     )
+    phone_number = models.CharField(max_length=20)
+    id_number = models.CharField(max_length=50)
+    id_type = models.CharField(max_length=50)
+    signature = models.FileField(upload_to="ticket_signatures/", null=True, blank=True)
 
-#     status = models.CharField(
-#         choices=Status.choices,
-#         max_length=50,
-#         default=Status.WAITING,
-#     )
+    status = models.CharField(
+        max_length=20,
+        choices=TicketStatus.choices,
+        default=TicketStatus.WAITING,
+        db_index=True,
+    )
 
-#     hold_reason = models.CharField(
-#         max_length=300,
-#         null=True,
-#         blank=True,
-#     )
+    counter = models.ForeignKey(
+        Counter,
+        related_name="tickets_served",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    servced_by = models.ForeignKey(
+        "accounts.CustomUser",
+        related_name="tickets_served",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    ticket_audio = models.FileField(upload_to="ticket_audio/", null=True, blank=True)
+    # Time DATA
+    waiting_time = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Seconds from issue until called.",
+    )
+    called_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the ticket was first called.",
+    )
+    start_serve_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When serving started at the counter.",
+    )
+    served_time = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Seconds from start of serve until completed (optional).",
+    )
+    total_time_spent = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Seconds from issue until visit completed (optional).",
+    )
 
-#     from_device = models.ForeignKey(
-#         Device,
-#         on_delete=models.SET_NULL,
-#         null=True,
-#         blank=True,
-#     )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-#     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
-#     created_at = models.DateTimeField(auto_now_add=True)
-#     updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("branch", "ticket_number"),
+                name="core_ticket_branch_ticket_number_uniq",
+            ),
+        ]
 
-#     def __str__(self):
-#         return "{} - {}".format(
-#             date=self.created_at,
-#             ticket_number=self.ticket_number,
-#         )
+    def clean(self):
+        super().clean()
+        if (
+            self.device_id
+            and self.branch_id
+            and self.device.branch_id != self.branch_id
+        ):
+            raise ValidationError(
+                {"branch": "Branch must match the issuing device's branch."}
+            )
+
+    def __str__(self):
+        return (
+            f"{self.branch.code} — {self.ticket_number} ({self.get_status_display()})"
+        )
+
+
+class TicketService(models.Model):
+    """
+    One catalogue service attached to a ticket (display / teller checklist).
+    Queue position and lifecycle belong to Ticket, not to each row here.
+    """
+
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="ticket_services",
+    )
+    service = models.ForeignKey(
+        Service,
+        on_delete=models.PROTECT,
+        related_name="ticket_services",
+    )
+    position = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Order of services as requested (0 = first).",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["ticket", "position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("ticket", "position"),
+                name="core_ticketservice_ticket_position_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.ticket.ticket_number}: {self.service} @ {self.position}"
 
 
 # ---------------------------------------------------------------------------
@@ -134,12 +186,21 @@ class CashDeposit(models.Model):
     id_type = models.CharField(max_length=50, null=True, blank=True)
     nationality = models.CharField(max_length=100, null=True, blank=True)
 
+    ticket = models.ForeignKey(
+        Ticket,
+        related_name="cash_deposits",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+
     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.ticket_number} — Cash Deposit ({self.deposit_type})"
+        num = self.ticket.ticket_number if self.ticket_id else "—"
+        return f"{num} — Cash Deposit ({self.deposit_type})"
 
 
 class ChequeDeposit(models.Model):
@@ -156,12 +217,21 @@ class ChequeDeposit(models.Model):
     phone_number = models.CharField(max_length=20)
     depositor_name = models.CharField(max_length=100)
 
+    ticket = models.ForeignKey(
+        Ticket,
+        related_name="cheque_deposits",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+
     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.ticket_number} — Cheque Deposit ({self.cheque_type})"
+        num = self.ticket.ticket_number if self.ticket_id else "—"
+        return f"{num} — Cheque Deposit ({self.cheque_type})"
 
 
 class EZWICHDeposit(models.Model):
@@ -174,12 +244,21 @@ class EZWICHDeposit(models.Model):
     occupation = models.CharField(max_length=100)
     phone_number = models.CharField(max_length=20)
 
+    ticket = models.ForeignKey(
+        Ticket,
+        related_name="ezwich_deposits",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+
     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.ticket_number} — EZWICHCard Deposit"
+        num = self.ticket.ticket_number if self.ticket_id else "—"
+        return f"{num} — EZWICHCard Deposit"
 
 
 class MobileMoneyDeposit(models.Model):
@@ -191,9 +270,18 @@ class MobileMoneyDeposit(models.Model):
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     occupation = models.CharField(max_length=100)
 
+    ticket = models.ForeignKey(
+        Ticket,
+        related_name="mobile_money_deposits",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+
     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.ticket_number} — Mobile Money Deposit"
+        num = self.ticket.ticket_number if self.ticket_id else "—"
+        return f"{num} — Mobile Money Deposit"

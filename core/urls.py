@@ -6,7 +6,7 @@ app_name = "core"
 
 router = DefaultRouter()
 router.register(
-    "deposit/cash",
+    "deposit/cash-deposit",
     views.CashDepositViewSet,
     basename="cash-deposit",
 )

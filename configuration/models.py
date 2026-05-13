@@ -234,3 +234,43 @@ auditlog.register(BranchWorkingHours)
 auditlog.register(Device, exclude_fields=["password"])
 auditlog.register(MainService)
 auditlog.register(Service)
+
+
+# ---------------------------------------------------------------------------
+# Counter
+# ---------------------------------------------------------------------------
+
+
+class CounterType(models.TextChoices):
+    PRIORITY_QUEUE = "PRIORITY_QUEUE", "Priority Queue"
+    NON_PRIORITY_QUEUE = "NON_PRIORITY_QUEUE", "Non-priority Queue"
+    VIP_QUEUE = "VIP_QUEUE", "VIP Queue"
+
+
+class Counter(models.Model):
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    branch = models.ForeignKey(Branch, on_delete=models.PROTECT, related_name="counters")
+    counter_code = models.CharField(max_length=20)
+    counter_name = models.CharField(max_length=100)
+    counter_type = models.CharField(max_length=30, choices=CounterType.choices)
+    is_active = models.BooleanField(default=True)
+    is_backoffice = models.BooleanField(default=True)
+    operations = models.ManyToManyField(Service, blank=True, related_name="counters")
+    created_by = models.ForeignKey(
+        "accounts.CustomUser",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="counters_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["branch", "counter_name"]
+
+    def __str__(self):
+        return f"{self.counter_name} ({self.counter_code}) — {self.branch.code}"
+
+
+auditlog.register(Counter)

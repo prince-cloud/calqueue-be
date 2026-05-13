@@ -1,5 +1,5 @@
 import django_filters
-from .models import Branch, Device, MainService, Service
+from .models import Branch, Counter, Device, MainService, Service
 
 
 class BranchFilter(django_filters.FilterSet):
@@ -24,3 +24,9 @@ class ServiceFilter(django_filters.FilterSet):
     class Meta:
         model = Service
         fields = ("is_active", "main_service")
+
+
+class CounterFilter(django_filters.FilterSet):
+    class Meta:
+        model = Counter
+        fields = ("is_active", "is_backoffice", "branch", "counter_type")

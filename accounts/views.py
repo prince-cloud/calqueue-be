@@ -1,37 +1,23 @@
+from django.contrib.auth.models import Group
+from django.utils import timezone
 from . import serializers
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.generics import CreateAPIView, GenericAPIView
+from rest_framework.generics import CreateAPIView
 from rest_framework import permissions as rest_permissions
-from django.utils.translation import gettext_lazy as _
-from dj_rest_auth.utils import jwt_encode
-from .models import CustomUser, UserID, UserAddress
-from helpers import exceptions
-from django.db import transaction
-from django.conf import settings
 from dj_rest_auth.views import LoginView as DJREST_LoginView
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
 from django.core.cache import cache
-from django.utils import timezone
+from django.db import transaction
+from django.conf import settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from loguru import logger
-
-
-class ProfileView(APIView):
-    serializer_class = serializers.UserSerializer
-    permission_classes = (rest_permissions.IsAuthenticated,)
-
-    def get(self, request):
-        user = request.user
-        serializer = serializers.UserSerializer(
-            instance=user,
-            many=False,
-            context={"request": request},
-        )
-        return Response(data=serializer.data)
+from .models import CustomUser, UserID, UserAddress, UserApproval
+from helpers import exceptions
+from .tasks import generic_send_mail
 
 
 class SignUpViewset(CreateAPIView, DJREST_LoginView):
@@ -76,7 +62,9 @@ class LogoutView(APIView):
             token.blacklist()
         except TokenError:
             raise exceptions.InvalidToken()
-        return Response({"message": "Successfully logged out."}, status=status.HTTP_200_OK)
+        return Response(
+            {"message": "Successfully logged out."}, status=status.HTTP_200_OK
+        )
 
 
 class ResetPasswordOtpView(CreateAPIView):
@@ -328,3 +316,130 @@ class ProfilePictureView(APIView):
         profile_view.clear_user_profile_cache(user.id)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Roles (auth.Group wrappers)
+# ---------------------------------------------------------------------------
+
+
+class RoleViewSet(ModelViewSet):
+    queryset = Group.objects.order_by("name")
+    search_fields = ("name",)
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return serializers.RoleWriteSerializer
+        return serializers.RoleSerializer
+
+    def create(self, request, *args, **kwargs):
+        s = self.get_serializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        instance = s.save()
+        return Response(
+            serializers.RoleSerializer(instance).data, status=status.HTTP_201_CREATED
+        )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        s = self.get_serializer(instance, data=request.data, partial=partial)
+        s.is_valid(raise_exception=True)
+        instance = s.save()
+        return Response(serializers.RoleSerializer(instance).data)
+
+
+# ---------------------------------------------------------------------------
+# System Users
+# ---------------------------------------------------------------------------
+
+
+class SystemUserViewSet(ModelViewSet):
+    queryset = (
+        CustomUser.objects.exclude(user_type="")
+        .select_related("role", "branch", "queue_counter")
+        .order_by("first_name", "last_name")
+    )
+    lookup_field = "uuid"
+    search_fields = ("first_name", "last_name", "email", "cbs_id")
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return serializers.SystemUserWriteSerializer
+        return serializers.SystemUserSerializer
+
+    def create(self, request, *args, **kwargs):
+        s = self.get_serializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        instance = s.save()
+        UserApproval.objects.create(user=instance)
+        return Response(
+            serializers.SystemUserSerializer(instance).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        s = self.get_serializer(instance, data=request.data, partial=partial)
+        s.is_valid(raise_exception=True)
+        instance = s.save()
+        return Response(serializers.SystemUserSerializer(instance).data)
+
+
+# ---------------------------------------------------------------------------
+# User Approvals
+# ---------------------------------------------------------------------------
+
+
+class UserApprovalViewSet(ModelViewSet):
+    queryset = UserApproval.objects.select_related(
+        "user", "user__role", "user__branch", "user__queue_counter"
+    ).order_by("-created_at")
+    serializer_class = serializers.UserApprovalSerializer
+    lookup_field = "uuid"
+    http_method_names = ["get", "post", "head", "options"]
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, uuid=None):
+        approval = self.get_object()
+        approval.status = UserApproval.Status.APPROVED
+        approval.processed_by = (
+            request.user if isinstance(request.user, CustomUser) else None
+        )
+        approval.processed_at = timezone.now()
+        approval.save()
+        user = approval.user
+        generic_send_mail.delay(
+            recipient=user.email,
+            title="Your CalQueue Account Has Been Approved",
+            template_type="user_approved",
+            payload={
+                "first_name": user.first_name,
+                "full_name": user.get_full_name(),
+                "email": user.email,
+                "t24_username": user.t24_username,
+                "cbs_id": user.cbs_id,
+                "branch": user.branch.name if user.branch_id else "—",
+                "role": user.role.name if user.role_id else "—",
+            },
+        )
+        return Response(serializers.UserApprovalSerializer(approval).data)
+
+    @action(detail=True, methods=["post"])
+    def reject(self, request, uuid=None):
+        approval = self.get_object()
+        approval.status = UserApproval.Status.REJECTED
+        approval.processed_by = (
+            request.user if isinstance(request.user, CustomUser) else None
+        )
+        approval.processed_at = timezone.now()
+        approval.save()
+        user = approval.user
+        generic_send_mail.delay(
+            recipient=user.email,
+            title="Your CalQueue Account Request Update",
+            template_type="user_rejected",
+            payload={"first_name": user.first_name},
+        )
+        return Response(serializers.UserApprovalSerializer(approval).data)

@@ -1,0 +1,41 @@
+{% extends "base_email.html" %}
+
+{% block email_title %}Your Account Has Been Approved — CalQueue{% endblock %}
+
+{% block email_content %}
+<h2>Account Approved</h2>
+<p>Hello {{ first_name }},</p>
+<p>Great news! Your CalQueue account has been approved. You can now log in and start using the system.</p>
+
+<div class="info-box">
+    <p><strong>Your Account Details</strong></p>
+    <table style="width: 100%; margin-top: 12px; font-size: 14px; color: #475569; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 6px 0; font-weight: 600; width: 40%;">Full Name</td>
+            <td style="padding: 6px 0;">{{ full_name }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; font-weight: 600;">Email</td>
+            <td style="padding: 6px 0;">{{ email }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; font-weight: 600;">T24 Username</td>
+            <td style="padding: 6px 0;">{{ t24_username }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; font-weight: 600;">CBS ID</td>
+            <td style="padding: 6px 0;">{{ cbs_id }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; font-weight: 600;">Branch</td>
+            <td style="padding: 6px 0;">{{ branch }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 6px 0; font-weight: 600;">Role</td>
+            <td style="padding: 6px 0;">{{ role }}</td>
+        </tr>
+    </table>
+</div>
+
+<p>Please keep your credentials safe and do not share them with anyone. If you have any questions, contact your branch administrator.</p>
+{% endblock %}

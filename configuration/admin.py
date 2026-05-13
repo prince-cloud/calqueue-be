@@ -1,7 +1,7 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin, TabularInline
 
-from .models import Branch, BranchWorkingHours, Device, MainService, Service
+from .models import Branch, BranchWorkingHours, Counter, Device, MainService, Service
 
 
 class BranchWorkingHoursInline(TabularInline):
@@ -49,4 +49,12 @@ class ServiceAdmin(ModelAdmin):
     list_display = ("name", "main_service", "is_active", "created_at")
     list_filter = ("is_active", "main_service")
     search_fields = ("name",)
+    readonly_fields = ("uuid", "created_at", "updated_at")
+
+
+@admin.register(Counter)
+class CounterAdmin(ModelAdmin):
+    list_display = ("counter_name", "counter_code", "branch", "counter_type", "is_active", "is_backoffice")
+    list_filter = ("is_active", "is_backoffice", "counter_type", "branch")
+    search_fields = ("counter_name", "counter_code")
     readonly_fields = ("uuid", "created_at", "updated_at")

@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.core.cache import cache
 from django.utils import timezone
 from helpers import exceptions
-from .models import Branch, BranchWorkingHours, Device, MainService, Service
+from .models import Branch, BranchWorkingHours, Device, MainService, Service, Counter
 
 
 class BranchWorkingHoursSerializer(serializers.ModelSerializer):
@@ -131,3 +131,55 @@ class MainServiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = MainService
         fields = ("uuid", "name", "icon", "description", "is_active", "services")
+
+
+class CounterSerializer(serializers.ModelSerializer):
+    branch = BranchSerializer(read_only=True)
+    operations = ServiceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Counter
+        fields = (
+            "uuid",
+            "branch",
+            "counter_code",
+            "counter_name",
+            "counter_type",
+            "is_active",
+            "is_backoffice",
+            "operations",
+        )
+
+
+class CounterWriteSerializer(serializers.ModelSerializer):
+    branch = serializers.SlugRelatedField(slug_field="uuid", queryset=Branch.objects.all())
+    operations = serializers.SlugRelatedField(
+        slug_field="uuid", queryset=Service.objects.all(), many=True, required=False
+    )
+
+    class Meta:
+        model = Counter
+        fields = (
+            "branch",
+            "counter_code",
+            "counter_name",
+            "counter_type",
+            "is_active",
+            "is_backoffice",
+            "operations",
+        )
+
+    def create(self, validated_data):
+        operations = validated_data.pop("operations", [])
+        instance = Counter.objects.create(**validated_data)
+        instance.operations.set(operations)
+        return instance
+
+    def update(self, instance, validated_data):
+        operations = validated_data.pop("operations", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if operations is not None:
+            instance.operations.set(operations)
+        return instance

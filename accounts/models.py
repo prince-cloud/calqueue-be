@@ -8,6 +8,12 @@ from django.core.cache import cache
 from audit.registry import auditlog
 
 
+class UserType(models.TextChoices):
+    ADMIN = "ADMIN", "Admin"
+    TELLER = "TELLER", "Teller"
+    MANAGER = "MANAGER", "Manager"
+
+
 class CustomUser(AbstractUser):
     # AUTHENTICATION
     email = models.EmailField(_("email address"), unique=True, db_index=True)
@@ -24,6 +30,36 @@ class CustomUser(AbstractUser):
     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     deactivated_account = models.BooleanField(default=False)
     last_updated = models.DateTimeField(auto_now=True)
+
+    # STAFF / SYSTEM USER FIELDS (blank for regular/public users)
+    cbs_id = models.CharField(max_length=50, blank=True, default="")
+    user_type = models.CharField(
+        max_length=20, choices=UserType.choices, blank=True, default=""
+    )
+    role = models.ForeignKey(
+        "auth.Group",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="system_users",
+        help_text="Permission group governing what this user can do.",
+    )
+    branch = models.ForeignKey(
+        "configuration.Branch",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="staff",
+    )
+    queue_counter = models.ForeignKey(
+        "configuration.Counter",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="staff",
+    )
+    t24_username = models.CharField(max_length=100, blank=True, default="")
+    t24_login_required = models.BooleanField(default=False)
 
     def __str__(self):
         return "{}:{}".format(self.fullname, self.email)
@@ -106,3 +142,39 @@ class UserAddress(models.Model):
 
 auditlog.register(UserID)
 auditlog.register(UserAddress)
+
+
+# ---------------------------------------------------------------------------
+# User Approval
+# ---------------------------------------------------------------------------
+
+
+class UserApproval(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        APPROVED = "APPROVED", "Approved"
+        REJECTED = "REJECTED", "Rejected"
+
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    user = models.OneToOneField(
+        CustomUser, on_delete=models.CASCADE, related_name="approval"
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    processed_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approvals_processed",
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Approval for {self.user} — {self.status}"
+
+
+auditlog.register(UserApproval)

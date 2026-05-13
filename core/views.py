@@ -1,5 +1,7 @@
+from requests import Response
 from rest_framework.viewsets import ModelViewSet
-
+from rest_framework.views import APIView
+from rest_framework import status
 from .filters import (
     CashDepositFilter,
     ChequeDepositFilter,
@@ -17,7 +19,15 @@ from .serializers import (
     ChequeDepositSerializer,
     EZWICHDepositSerializer,
     MobileMoneyDepositSerializer,
+    GetTicketSerializer,
 )
+
+
+class GetTicketViewset(APIView):
+    serializer_class = GetTicketSerializer
+
+    def get(self):
+        return Response(data={"status": True}, status=status.HTTP)
 
 
 class BaseTicketViewSet(ModelViewSet):

@@ -7,13 +7,16 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework_simplejwt.exceptions import TokenError
 
+from accounts.permissions import IsSystemUser, ModelPermissions
 from helpers import exceptions
-from .filters import BranchFilter, DeviceFilter, MainServiceFilter, ServiceFilter
-from .models import Branch, Device, MainService, Service
+from .filters import BranchFilter, CounterFilter, DeviceFilter, MainServiceFilter, ServiceFilter
+from .models import Branch, Device, MainService, Service, Counter
 from .permissions import IsDevice
 from .serializers import (
     BranchSerializer,
     BranchWriteSerializer,
+    CounterSerializer,
+    CounterWriteSerializer,
     DeviceLoginSerializer,
     DeviceRefreshSerializer,
     DeviceSerializer,
@@ -102,6 +105,11 @@ class BranchViewSet(ModelViewSet):
     ordering_fields = ("name", "created_at")
     lookup_field = "uuid"
 
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [(IsSystemUser | IsDevice)()]
+        return [ModelPermissions()]
+
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):
             return BranchWriteSerializer
@@ -128,6 +136,9 @@ class DeviceViewSet(ModelViewSet):
     search_fields = ("username", "serial_number", "label")
     ordering_fields = ("label", "created_at")
     lookup_field = "uuid"
+
+    def get_permissions(self):
+        return [ModelPermissions()]
 
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):
@@ -161,6 +172,11 @@ class MainServiceViewSet(ModelViewSet):
     ordering_fields = ("name", "created_at")
     lookup_field = "uuid"
 
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [(IsSystemUser | IsDevice)()]
+        return [ModelPermissions()]
+
 
 class ServiceViewSet(ModelViewSet):
     queryset = (
@@ -172,6 +188,11 @@ class ServiceViewSet(ModelViewSet):
     search_fields = ("name",)
     ordering_fields = ("name", "created_at")
     lookup_field = "uuid"
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [(IsSystemUser | IsDevice)()]
+        return [ModelPermissions()]
 
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):
@@ -191,3 +212,41 @@ class ServiceViewSet(ModelViewSet):
         write_serializer.is_valid(raise_exception=True)
         instance = write_serializer.save()
         return Response(ServiceSerializer(instance).data)
+
+
+class CounterViewSet(ModelViewSet):
+    queryset = (
+        Counter.objects.select_related("branch")
+        .prefetch_related("operations")
+        .order_by("branch", "counter_name")
+    )
+    filterset_class = CounterFilter
+    search_fields = ("counter_code", "counter_name")
+    ordering_fields = ("counter_name", "created_at")
+    lookup_field = "uuid"
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [(IsSystemUser | IsDevice)()]
+        return [ModelPermissions()]
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return CounterWriteSerializer
+        return CounterSerializer
+
+    def create(self, request, *args, **kwargs):
+        from accounts.models import CustomUser
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        created_by = request.user if isinstance(request.user, CustomUser) else None
+        instance = write_serializer.save(created_by=created_by)
+        return Response(CounterSerializer(instance).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        write_serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(CounterSerializer(instance).data)

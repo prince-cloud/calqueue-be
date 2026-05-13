@@ -1,0 +1,15 @@
+{% extends "base_email.html" %}
+
+{% block email_title %}Account Request Update — CalQueue{% endblock %}
+
+{% block email_content %}
+<h2>Account Request Not Approved</h2>
+<p>Hello {{ first_name }},</p>
+<p>We regret to inform you that your CalQueue account request has not been approved at this time.</p>
+
+<div class="info-box">
+    <p>If you believe this is an error or would like more information, please contact your branch administrator or HR department for assistance.</p>
+</div>
+
+<p>You may resubmit your account request once any outstanding issues have been resolved.</p>
+{% endblock %}

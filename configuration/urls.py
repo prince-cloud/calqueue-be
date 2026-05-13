@@ -10,6 +10,7 @@ router.register("branches", views.BranchViewSet, basename="branch")
 router.register("devices", views.DeviceViewSet, basename="device")
 router.register("main-services", views.MainServiceViewSet, basename="main-service")
 router.register("services", views.ServiceViewSet, basename="service")
+router.register("counters", views.CounterViewSet, basename="counter")
 
 urlpatterns = [
     path("device/login/", views.DeviceLoginView.as_view(), name="device-login"),

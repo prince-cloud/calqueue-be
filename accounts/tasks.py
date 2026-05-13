@@ -34,6 +34,8 @@ def generic_send_mail(
         "email_otp_verification": "email_otp_verification.html",
         "password_reset_otp": "password_reset_otp.html",
         "password_changed": "password_changed.html",
+        "user_approved": "user_approved.html",
+        "user_rejected": "user_rejected.html",
     }
 
     template_file = template_map.get(template_type, "email_otp_verification.html")

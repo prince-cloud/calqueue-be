@@ -1,5 +1,5 @@
 from rest_framework.routers import DefaultRouter
-
+from django.urls import path
 from . import views
 
 app_name = "core"
@@ -26,4 +26,7 @@ router.register(
     basename="mobile-money-deposit",
 )
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("get-ticket/", views.GetTicketViewset.as_view(), name="get-ticket"),
+    *router.urls,
+]

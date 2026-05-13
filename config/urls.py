@@ -7,6 +7,7 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 from django.conf.urls.static import static
+
 urlpatterns = [
     path("bknd-ctr/", admin.site.urls),
     path("accounts/", include("allauth.urls")),
@@ -15,16 +16,8 @@ urlpatterns = [
     path("configuration/", include("configuration.urls")),
     path("core/", include("core.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path(
-        "api/docs/",
-        SpectacularSwaggerView.as_view(url_name="schema"),
-        name="swagger-ui",
-    ),
-    path(
-        "api/redoc/",
-        SpectacularRedocView.as_view(url_name="schema"),
-        name="redoc",
-    ),
+    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
 ]
 
 urlpatterns = (
@@ -33,10 +26,7 @@ urlpatterns = (
     + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 )
 
-
 if settings.DEBUG:
     import debug_toolbar
 
-    urlpatterns = [
-        path("__debug__/", include(debug_toolbar.urls)),
-    ] + urlpatterns
+    urlpatterns = [path("__debug__/", include(debug_toolbar.urls))] + urlpatterns

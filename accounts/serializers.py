@@ -1,5 +1,6 @@
+from django.contrib.auth.models import Group
 from rest_framework import serializers
-from .models import CustomUser, UserID, UserAddress
+from .models import CustomUser, UserID, UserAddress, UserApproval
 from dj_rest_auth.serializers import LoginSerializer
 from datetime import datetime, timedelta
 from django.core.cache import cache
@@ -555,3 +556,134 @@ class ProfilePictureSerializer(serializers.ModelSerializer):
             if existing_user:
                 raise exceptions.PhoneNumberAlreadyInUseException()
         return phone_number
+
+
+# ---------------------------------------------------------------------------
+# Roles / Groups
+# ---------------------------------------------------------------------------
+
+
+class RoleSerializer(serializers.ModelSerializer):
+    uuid = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Group
+        fields = ("uuid", "name")
+
+    def get_uuid(self, obj):
+        return str(obj.pk)
+
+
+class RoleWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Group
+        fields = ("name",)
+
+
+# ---------------------------------------------------------------------------
+# System Users
+# ---------------------------------------------------------------------------
+
+
+class _BranchMinimalSerializer(serializers.Serializer):
+    uuid = serializers.UUIDField()
+    name = serializers.CharField()
+    code = serializers.CharField()
+
+
+class _CounterMinimalSerializer(serializers.Serializer):
+    uuid = serializers.UUIDField()
+    counter_name = serializers.CharField()
+    counter_code = serializers.CharField()
+
+
+class SystemUserSerializer(serializers.ModelSerializer):
+    role = RoleSerializer(read_only=True)
+    branch = _BranchMinimalSerializer(read_only=True)
+    queue_counter = _CounterMinimalSerializer(read_only=True)
+    created_at = serializers.DateTimeField(source="date_joined", read_only=True)
+
+    class Meta:
+        model = CustomUser
+        fields = (
+            "uuid",
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "cbs_id",
+            "user_type",
+            "role",
+            "branch",
+            "queue_counter",
+            "t24_username",
+            "is_active",
+            "t24_login_required",
+            "created_at",
+        )
+
+
+class SystemUserWriteSerializer(serializers.ModelSerializer):
+    from configuration.models import Branch, Counter
+    role = serializers.PrimaryKeyRelatedField(
+        queryset=Group.objects.all(), allow_null=True, required=False
+    )
+    branch = serializers.SlugRelatedField(
+        slug_field="uuid", queryset=Branch.objects.all(), allow_null=True, required=False
+    )
+    queue_counter = serializers.SlugRelatedField(
+        slug_field="uuid", queryset=Counter.objects.all(), allow_null=True, required=False
+    )
+    password = serializers.CharField(write_only=True, required=False, min_length=8)
+
+    class Meta:
+        model = CustomUser
+        fields = (
+            "first_name",
+            "last_name",
+            "email",
+            "phone_number",
+            "password",
+            "cbs_id",
+            "user_type",
+            "role",
+            "branch",
+            "queue_counter",
+            "t24_username",
+            "is_active",
+            "t24_login_required",
+        )
+
+    def create(self, validated_data):
+        password = validated_data.pop("password", None)
+        email = validated_data["email"]
+        user = CustomUser(**validated_data)
+        user.username = email
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
+        user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop("password", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if password:
+            instance.set_password(password)
+        instance.save()
+        return instance
+
+
+# ---------------------------------------------------------------------------
+# User Approvals
+# ---------------------------------------------------------------------------
+
+
+class UserApprovalSerializer(serializers.ModelSerializer):
+    user = SystemUserSerializer(read_only=True)
+
+    class Meta:
+        model = UserApproval
+        fields = ("uuid", "user", "status", "processed_at", "created_at")

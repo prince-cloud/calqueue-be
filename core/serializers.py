@@ -7,6 +7,15 @@ from .models import (
 )
 
 
+class GetTicketSerializer(serializers.Serializer):
+    device = serializers.UUIDField()
+    # get the branch from the device
+    customer_phone_number = serializers.CharField()
+    id_number = serializers.CharField()
+    id_type = serializers.CharField()
+    services = serializers.ListField(child=serializers.JSONField())
+
+
 class CashDepositSerializer(serializers.ModelSerializer):
     class Meta:
         model = CashDeposit

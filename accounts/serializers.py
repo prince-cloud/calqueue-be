@@ -19,7 +19,62 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from loguru import logger
 
 
+class _ProfileRoleSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class _ProfileBranchSerializer(serializers.Serializer):
+    uuid = serializers.UUIDField()
+    name = serializers.CharField()
+    code = serializers.CharField()
+    location = serializers.CharField()
+
+
+class _ProfileCounterSerializer(serializers.Serializer):
+    uuid = serializers.UUIDField()
+    counter_name = serializers.CharField()
+    counter_code = serializers.CharField()
+
+
+class _ProfileIdentitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserID
+        fields = (
+            "uuid",
+            "id_type",
+            "id_number",
+            "id_front_image",
+            "id_back_image",
+            "last_updated",
+        )
+
+
+class _ProfileAddressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserAddress
+        fields = (
+            "uuid",
+            "gps_address",
+            "address",
+            "nearest_landmark",
+            "city",
+            "region",
+            "last_updated",
+        )
+
+
 class UserSerializer(serializers.ModelSerializer):
+    role = _ProfileRoleSerializer(read_only=True)
+    branch = _ProfileBranchSerializer(read_only=True)
+    queue_counter = _ProfileCounterSerializer(read_only=True)
+    identity = _ProfileIdentitySerializer(
+        source="user_identity", read_only=True, default=None
+    )
+    address = _ProfileAddressSerializer(
+        source="user_address", read_only=True, default=None
+    )
+
     class Meta:
         model = CustomUser
         fields = (
@@ -30,6 +85,16 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "fullname",
             "profile_picture",
+            "user_type",
+            "cbs_id",
+            "t24_username",
+            "t24_login_required",
+            "is_active",
+            "role",
+            "branch",
+            "queue_counter",
+            "identity",
+            "address",
             "can_update",
         )
 
@@ -174,12 +239,12 @@ class CustomLoginSerializer(LoginSerializer):
         email = attrs.get("email")
         password = attrs.get("password")
 
-        attempt = cache.get(f"login-attempt/{username}")
+        attempt = cache.get(f"login-attempt/{email}")
         if attempt:
             attempt += 1
         else:
             attempt = 1
-        cache.set(f"login-attempt/{username}", attempt, 60 * 5)
+        cache.set(f"login-attempt/{email}", attempt, 60 * 5)
         if attempt > 5:
             raise exceptions.TooManyLoginAttemptsException()
 
@@ -625,14 +690,21 @@ class SystemUserSerializer(serializers.ModelSerializer):
 
 class SystemUserWriteSerializer(serializers.ModelSerializer):
     from configuration.models import Branch, Counter
+
     role = serializers.PrimaryKeyRelatedField(
         queryset=Group.objects.all(), allow_null=True, required=False
     )
     branch = serializers.SlugRelatedField(
-        slug_field="uuid", queryset=Branch.objects.all(), allow_null=True, required=False
+        slug_field="uuid",
+        queryset=Branch.objects.all(),
+        allow_null=True,
+        required=False,
     )
     queue_counter = serializers.SlugRelatedField(
-        slug_field="uuid", queryset=Counter.objects.all(), allow_null=True, required=False
+        slug_field="uuid",
+        queryset=Counter.objects.all(),
+        allow_null=True,
+        required=False,
     )
     password = serializers.CharField(write_only=True, required=False, min_length=8)
 

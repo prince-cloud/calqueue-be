@@ -256,6 +256,13 @@ class Counter(models.Model):
     is_active = models.BooleanField(default=True)
     is_backoffice = models.BooleanField(default=True)
     operations = models.ManyToManyField(Service, blank=True, related_name="counters")
+    current_ticket = models.ForeignKey(
+        "core.Ticket",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="current_at_counter",
+    )
     created_by = models.ForeignKey(
         "accounts.CustomUser",
         on_delete=models.SET_NULL,

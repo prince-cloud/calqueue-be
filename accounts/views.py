@@ -190,36 +190,13 @@ class ProfileView(APIView):
     permission_classes = (rest_permissions.IsAuthenticated,)
 
     def get(self, request):
-        """
-        Retrieve user profile with caching.
-        If the user profile has been retrieved before, return the cached object.
-        """
-        user = request.user
-        logger.debug("Profile requested for user: {}", user.id)
-
-        # Create a cache key using the user ID
-        # cache_key = f"user_profile_{user.id}"
-
-        # Try to get the cached response
-        # cached_response = cache.get(cache_key)
-
-        # if cached_response is not None:
-        #     print(f"Returning cached user profile: {user.id}")
-        #     return Response(cached_response, status=status.HTTP_200_OK)
-
-        # If not cached, serialize the user data
-        serializer = serializers.UserSerializer(
-            instance=user,
-            many=False,
-            context={"request": request},
+        user = (
+            CustomUser.objects
+            .select_related("role", "branch", "queue_counter", "user_identity", "user_address")
+            .get(pk=request.user.pk)
         )
-        response_data = serializer.data
-
-        # Cache the response for 30 minutes (1800 seconds)
-        # cache.set(cache_key, response_data, 60 * 60 * 12)
-
-        logger.debug("Returning user profile: {}", user.id)
-        return Response(data=response_data, status=status.HTTP_200_OK)
+        serializer = serializers.UserSerializer(instance=user, context={"request": request})
+        return Response(data=serializer.data, status=status.HTTP_200_OK)
 
     def clear_user_profile_cache(self, user_id):
         """

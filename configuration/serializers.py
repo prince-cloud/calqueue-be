@@ -136,6 +136,9 @@ class MainServiceSerializer(serializers.ModelSerializer):
 class CounterSerializer(serializers.ModelSerializer):
     branch = BranchSerializer(read_only=True)
     operations = ServiceSerializer(many=True, read_only=True)
+    current_ticket_number = serializers.CharField(
+        source="current_ticket.ticket_number", read_only=True, default=None
+    )
 
     class Meta:
         model = Counter
@@ -148,6 +151,8 @@ class CounterSerializer(serializers.ModelSerializer):
             "is_active",
             "is_backoffice",
             "operations",
+            "current_ticket",
+            "current_ticket_number",
         )
 
 

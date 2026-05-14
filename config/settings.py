@@ -36,6 +36,7 @@ ALLOWED_HOSTS = [
 # Application definition
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = [
+    "daphne",  # must be first for ASGI WebSocket support
     "unfold",  # before django.contrib.admin
     "unfold.contrib.filters",  # optional, if special filters are needed
     "unfold.contrib.forms",  # optional, if special form elements are needed
@@ -51,6 +52,7 @@ INSTALLED_APPS = [
     "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    "django.contrib.postgres",
     # Third-party
     "allauth",
     "allauth.account",
@@ -70,12 +72,15 @@ INSTALLED_APPS = [
     "drf_yasg",
     "django_celery_beat",
     "storages",
+    "channels",
     # Local
     "accounts",
     "configuration",
     "core",
     "audit",
 ]
+
+ASGI_APPLICATION = "config.asgi.application"
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#middleware
 MIDDLEWARE = [
@@ -335,8 +340,8 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "NON_FIELD_ERRORS_KEY": "error",
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "configuration.authentication.DeviceJWTAuthentication",
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_THROTTLE_CLASSES": [

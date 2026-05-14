@@ -1,87 +1,211 @@
-import json
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
+
+from configuration.models import Branch, Device, ServiceTypes
 from .models import (
     CashDeposit,
     ChequeDeposit,
     EZWICHDeposit,
     MobileMoneyDeposit,
+    Ticket,
 )
-from configuration.models import Device
-from helpers import exceptions
+
+_VALID_SERVICE_TYPES = set(ServiceTypes.values)
+_SERVICE_TYPE_LABELS = dict(
+    ServiceTypes.choices
+)  # {"CASH DEPOSIT": "Cash Deposit", ...}
 
 
-class GetTicketSerializer(serializers.Serializer):
+def _next_ticket_number(branch, lead_service_type):
+    prefix = (lead_service_type[0] if lead_service_type else "T").upper()
+    today = timezone.now().date()
+    count = Ticket.objects.filter(branch=branch, created_at__date=today).count() + 1
+    return f"{prefix}{count:03d}"
+
+
+# ---------------------------------------------------------------------------
+# Polymorphic services write field
+# ---------------------------------------------------------------------------
+
+
+class _ServicesField(serializers.Field):
+    """
+    Accepts a list of service objects each with a service_type field.
+    The rest of each object's data is stored as-is in services_data (JSON).
+    No DB lookup required — service_type is validated against the ServiceTypes enum.
+    """
+
+    def to_internal_value(self, data):
+        # Form-encoded requests send JSON fields as strings — parse them first
+        if isinstance(data, str):
+            import json
+            try:
+                data = json.loads(data)
+            except (ValueError, TypeError):
+                raise serializers.ValidationError("Must be a valid JSON list.")
+
+        if not isinstance(data, list) or not data:
+            raise serializers.ValidationError("Must be a non-empty list.")
+
+        validated_items = []
+        item_errors = {}
+
+        for i, item in enumerate(data):
+            if not isinstance(item, dict):
+                item_errors[i] = {"non_field_errors": ["Expected an object."]}
+                continue
+            service_type = item.get("service_type")
+            if service_type not in _VALID_SERVICE_TYPES:
+                item_errors[i] = {
+                    "service_type": [f"'{service_type}' is not a valid service type."]
+                }
+                continue
+            validated_items.append(dict(item))
+
+        if item_errors:
+            raise serializers.ValidationError(item_errors)
+
+        return validated_items
+
+    def to_representation(self, value):
+        return value
+
+
+# ---------------------------------------------------------------------------
+# Ticket — write
+# ---------------------------------------------------------------------------
+
+
+class TicketWriteSerializer(serializers.Serializer):
     device = serializers.UUIDField()
-    # get the branch from the device
-    phone_number = serializers.CharField()
-    id_number = serializers.CharField()
-    id_type = serializers.CharField()
-    signature = serializers.FileField(allow_null=True, required=False)
-    services = serializers.JSONField()
+    phone_number = serializers.CharField(max_length=20)
+    id_number = serializers.CharField(max_length=50)
+    id_type = serializers.CharField(max_length=50)
+    signature = serializers.ImageField(required=False, allow_null=True)
+    services = _ServicesField()
 
     def validate_device(self, value):
         try:
-            device = Device.objects.get(uuid=value)
-        except Device.DoesNotExist:
-            raise exceptions.GeneralException(detail="Device not found.")
-        return device
-
-    def validate_services(self, value):
-        if isinstance(value, str):
-            try:
-                parsed = json.loads(value)
-            except json.JSONDecodeError:
-                raise exceptions.GeneralException(detail="Services must be valid JSON.")
-        else:
-            parsed = value
-
-        if not isinstance(parsed, list):
-            raise exceptions.GeneralException(
-                detail="Services must be a JSON array of objects."
+            return Device.objects.select_related("branch").get(
+                uuid=value, is_active=True
             )
+        except Device.DoesNotExist:
+            raise serializers.ValidationError("Device not found or inactive.")
 
-        normalized = []
-        for i, item in enumerate(parsed):
-            if isinstance(item, str):
-                try:
-                    item = json.loads(item)
-                except json.JSONDecodeError:
-                    raise exceptions.GeneralException(
-                        detail=f"Services[{i}] must be a valid JSON object."
-                    )
-            if not isinstance(item, dict):
-                raise exceptions.GeneralException(
-                    detail=f'Services[{i}] must be a JSON object (e.g. {{"id": …, "name": …}}).'
-                )
-            normalized.append(item)
+    def validate(self, attrs):
+        device = attrs["device"]
+        if not device.branch_id:
+            raise serializers.ValidationError(
+                {"device": "Device has no branch assigned."}
+            )
+        attrs["branch"] = device.branch
+        return attrs
 
-        return normalized
+    @transaction.atomic
+    def create(self, validated_data):
+        service_items = validated_data.pop("services")
+        branch = validated_data.pop("branch")
+
+        # Lock the branch row so concurrent ticket creations for the same
+        # branch queue behind each other, preventing duplicate ticket numbers.
+        branch = Branch.objects.select_for_update().get(pk=branch.pk)
+
+        ticket = Ticket.objects.create(
+            branch=branch,
+            ticket_number=_next_ticket_number(branch, service_items[0]["service_type"]),
+            services_data=service_items,
+            **validated_data,
+        )
+        return ticket
 
 
-class CashDepositSerializer(serializers.ModelSerializer):
+# ---------------------------------------------------------------------------
+# Ticket — read
+# ---------------------------------------------------------------------------
+
+
+class TicketSerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source="branch.name", read_only=True)
+    branch_code = serializers.CharField(source="branch.code", read_only=True)
+    counter_name = serializers.CharField(
+        source="counter.counter_name", read_only=True, default=None
+    )
+    served_by_name = serializers.SerializerMethodField()
+    services = serializers.SerializerMethodField()
+
     class Meta:
-        model = CashDeposit
+        model = Ticket
         fields = (
             "uuid",
-            "deposit_type",
-            "account_number",
-            "account_name",
-            "amount",
+            "ticket_number",
+            "reference_number",
+            "branch_name",
+            "branch_code",
             "phone_number",
-            "depositor_name",
-            "residential_address",
-            "occupation",
+            "id_number",
             "id_type",
-            "nationality",
+            "status",
+            "counter_name",
+            "served_by_name",
+            "services",
+            "waiting_time",
+            "called_time",
+            "start_serve_time",
+            "served_time",
+            "total_time_spent",
             "created_at",
             "updated_at",
         )
 
+    def get_served_by_name(self, obj):
+        teller = obj.servced_by  # typo preserved from the model
+        if not teller:
+            return None
+        return teller.get_full_name() or teller.email
+
+    def get_services(self, obj):
+        return [
+            {
+                **item,
+                "service_name": _SERVICE_TYPE_LABELS.get(item.get("service_type"), ""),
+                "position": i,
+            }
+            for i, item in enumerate(obj.services_data)
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Deposit serializers — writable ticket + served_by UUID fields
+# ---------------------------------------------------------------------------
+
+from accounts.models import CustomUser  # noqa: E402
+
+
+class _DepositBaseSerializer(serializers.ModelSerializer):
+    """Shared behaviour: ticket and served_by resolved by UUID."""
+    ticket = serializers.SlugRelatedField(
+        slug_field="uuid", queryset=Ticket.objects.all(), allow_null=True, required=False
+    )
+    served_by = serializers.SlugRelatedField(
+        slug_field="uuid", queryset=CustomUser.objects.all(), allow_null=True, required=False
+    )
+    served_by_name = serializers.SerializerMethodField(read_only=True)
+
+    def get_served_by_name(self, obj):
+        if not obj.served_by_id:
+            return None
+        return obj.served_by.get_full_name() or obj.served_by.email
+
+
+class CashDepositSerializer(_DepositBaseSerializer):
+    class Meta:
+        model = CashDeposit
+        fields = "__all__"
+        read_only_fields = ("uuid", "t24_reference", "t24_status", "t24_response", "created_at", "updated_at")
+
     def validate(self, attrs):
-        deposit_type = attrs.get("deposit_type") or (
-            self.instance.deposit_type if self.instance else None
-        )
-        if deposit_type == CashDeposit.DepositType.THIRD_PARTY:
+        if attrs.get("deposit_type") == CashDeposit.DepositType.THIRD_PARTY:
             required = ["residential_address", "occupation", "id_type", "nationality"]
             errors = {
                 f: "Required for third party deposits."
@@ -93,52 +217,22 @@ class CashDepositSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class ChequeDepositSerializer(serializers.ModelSerializer):
+class ChequeDepositSerializer(_DepositBaseSerializer):
     class Meta:
         model = ChequeDeposit
-        fields = (
-            "uuid",
-            "cheque_type",
-            "beneficiary_account_number",
-            "beneficiary_account_name",
-            "cheque_details",
-            "phone_number",
-            "depositor_name",
-            "created_at",
-            "updated_at",
-        )
+        fields = "__all__"
+        read_only_fields = ("uuid", "t24_reference", "t24_status", "t24_response", "created_at", "updated_at")
 
 
-class EZWICHDepositSerializer(serializers.ModelSerializer):
+class EZWICHDepositSerializer(_DepositBaseSerializer):
     class Meta:
         model = EZWICHDeposit
-        fields = (
-            "uuid",
-            "id_type",
-            "id_number",
-            "ezwich_card_number",
-            "amount",
-            "name",
-            "residential_address",
-            "occupation",
-            "phone_number",
-            "created_at",
-            "updated_at",
-        )
+        fields = "__all__"
+        read_only_fields = ("uuid", "t24_reference", "t24_status", "t24_response", "created_at", "updated_at")
 
 
-class MobileMoneyDepositSerializer(serializers.ModelSerializer):
+class MobileMoneyDepositSerializer(_DepositBaseSerializer):
     class Meta:
         model = MobileMoneyDeposit
-        fields = (
-            "uuid",
-            "id_type",
-            "id_number",
-            "name",
-            "residential_address",
-            "phone_number",
-            "amount",
-            "occupation",
-            "created_at",
-            "updated_at",
-        )
+        fields = "__all__"
+        read_only_fields = ("uuid", "t24_reference", "t24_status", "t24_response", "created_at", "updated_at")

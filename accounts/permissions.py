@@ -24,8 +24,9 @@ class ModelPermissions(DjangoModelPermissions):
 
 class IsSystemUser(IsAuthenticated):
     """
-    Passes only for authenticated CustomUsers that have an active SystemUser
-    profile record. Devices and anonymous users are rejected.
+    Passes for authenticated, active CustomUsers that either are superusers or
+    have an active SystemUser profile (``user_type`` set). Devices and anonymous
+    users are rejected.
     Used to gate endpoints that any staff member can read, regardless of
     their specific permissions.
     """
@@ -42,8 +43,8 @@ class IsSystemUser(IsAuthenticated):
         user = request.user
         result = (
             isinstance(user, CustomUser)
-            and bool(getattr(user, "user_type", ""))
             and user.is_active
+            and (user.is_superuser or bool(getattr(user, "user_type", "")))
         )
         request._is_system_user = result
         return result

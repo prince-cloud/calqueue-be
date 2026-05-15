@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.core.cache import cache
 from django.utils import timezone
 from helpers import exceptions
-from .models import Branch, BranchWorkingHours, Device, MainService, Service, Counter
+from .models import Branch, BranchWorkingHours, Device, MainService, Service, Counter, SystemVoiceConfig, BranchVoiceConfig, BranchTVConfig, TVAdvertisement
 
 
 class BranchWorkingHoursSerializer(serializers.ModelSerializer):
@@ -188,3 +188,54 @@ class CounterWriteSerializer(serializers.ModelSerializer):
         if operations is not None:
             instance.operations.set(operations)
         return instance
+
+
+class SystemVoiceConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemVoiceConfig
+        fields = ("engine", "voice", "rate", "language", "tld", "slow", "announcement_template", "updated_at")
+        read_only_fields = ("updated_at",)
+
+
+class BranchVoiceConfigSerializer(serializers.ModelSerializer):
+    branch_uuid = serializers.UUIDField(source="branch.uuid", read_only=True)
+
+    class Meta:
+        model = BranchVoiceConfig
+        fields = ("branch_uuid", "engine", "voice", "rate", "language", "tld", "slow", "announcement_template", "updated_at")
+        read_only_fields = ("branch_uuid", "updated_at")
+
+
+class TVAdvertisementSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TVAdvertisement
+        fields = ("id", "media_type", "file_url", "order", "created_at")
+        read_only_fields = ("id", "file_url", "created_at")
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.file.url) if request else obj.file.url
+
+
+class TVAdvertisementWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TVAdvertisement
+        fields = ("media_type", "file", "order")
+
+
+class BranchTVConfigSerializer(serializers.ModelSerializer):
+    branch_uuid = serializers.UUIDField(source="branch.uuid", read_only=True)
+    advertisements = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BranchTVConfig
+        fields = ("branch_uuid", "ticker_texts", "show_ads", "advertisements", "updated_at")
+        read_only_fields = ("branch_uuid", "advertisements", "updated_at")
+
+    def get_advertisements(self, obj):
+        ads = obj.advertisements.all()
+        return TVAdvertisementSerializer(ads, many=True, context=self.context).data

@@ -281,3 +281,90 @@ class Counter(models.Model):
 
 
 auditlog.register(Counter)
+
+
+# ---------------------------------------------------------------------------
+# TTS / TV configuration
+# ---------------------------------------------------------------------------
+
+
+class TTSEngine(models.TextChoices):
+    EDGE_TTS = "EDGE_TTS", "Edge TTS (Microsoft Neural)"
+    GTTS = "GTTS", "gTTS (Google)"
+
+
+class SystemVoiceConfig(models.Model):
+    """Singleton — get via SystemVoiceConfig.get_solo()."""
+    engine = models.CharField(max_length=20, choices=TTSEngine.choices, default=TTSEngine.EDGE_TTS)
+    voice = models.CharField(max_length=100, default="en-US-GuyNeural")
+    rate = models.CharField(max_length=10, default="+0%", help_text="Edge TTS speed, e.g. -20%, +0%, +20%")
+    language = models.CharField(max_length=10, default="en")
+    tld = models.CharField(max_length=20, default="com")
+    slow = models.BooleanField(default=False)
+    announcement_template = models.TextField(
+        default="Ticket number {ticket_number}, please proceed to {counter_name}"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "System Voice Configuration"
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+
+class BranchVoiceConfig(models.Model):
+    """Per-branch TTS override. Falls back to SystemVoiceConfig if absent."""
+    branch = models.OneToOneField(Branch, on_delete=models.CASCADE, related_name="voice_config")
+    engine = models.CharField(max_length=20, choices=TTSEngine.choices, default=TTSEngine.EDGE_TTS)
+    voice = models.CharField(max_length=100, default="en-US-GuyNeural")
+    rate = models.CharField(max_length=10, default="+0%", help_text="Edge TTS speed, e.g. -20%, +0%, +20%")
+    language = models.CharField(max_length=10, default="en")
+    tld = models.CharField(max_length=20, default="com")
+    slow = models.BooleanField(default=False)
+    announcement_template = models.TextField(
+        default="Ticket number {ticket_number}, please proceed to {counter_name}"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Branch Voice Configuration"
+
+    def __str__(self):
+        return f"Voice config — {self.branch}"
+
+
+class BranchTVConfig(models.Model):
+    """Per-branch TV display configuration."""
+    branch = models.OneToOneField(Branch, on_delete=models.CASCADE, related_name="tv_config")
+    ticker_texts = models.JSONField(default=list)
+    show_ads = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Branch TV Configuration"
+
+    def __str__(self):
+        return f"TV config — {self.branch}"
+
+
+class TVAdvertisement(models.Model):
+    class MediaType(models.TextChoices):
+        VIDEO = "VIDEO", "Video"
+        IMAGE = "IMAGE", "Image"
+
+    tv_config = models.ForeignKey(BranchTVConfig, on_delete=models.CASCADE, related_name="advertisements")
+    media_type = models.CharField(max_length=10, choices=MediaType.choices)
+    file = models.FileField(upload_to="tv_ads/")
+    order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "created_at"]
+        verbose_name = "TV Advertisement"

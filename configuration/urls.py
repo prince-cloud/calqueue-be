@@ -17,5 +17,10 @@ urlpatterns = [
     path("device/logout/", views.DeviceLogoutView.as_view(), name="device-logout"),
     path("device/token/refresh/", views.DeviceTokenRefreshView.as_view(), name="device-token-refresh"),
     path("device/me/", views.DeviceProfileView.as_view(), name="device-profile"),
+    path("voice-config/", views.SystemVoiceConfigView.as_view(), name="system-voice-config"),
+    path("branches/<uuid:branch_uuid>/voice-config/", views.BranchVoiceConfigView.as_view(), name="branch-voice-config"),
+    path("branches/<uuid:branch_uuid>/tv-config/", views.BranchTVConfigView.as_view(), name="branch-tv-config"),
+    path("branches/<uuid:branch_uuid>/tv-config/ads/", views.BranchTVAdsView.as_view(), name="branch-tv-ads"),
+    path("branches/<uuid:branch_uuid>/tv-config/ads/<int:ad_id>/", views.BranchTVAdsView.as_view(), name="branch-tv-ad-detail"),
     *router.urls,
 ]

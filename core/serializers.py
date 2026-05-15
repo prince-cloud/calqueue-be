@@ -133,6 +133,7 @@ class TicketSerializer(serializers.ModelSerializer):
     )
     served_by_name = serializers.SerializerMethodField()
     services = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -156,6 +157,7 @@ class TicketSerializer(serializers.ModelSerializer):
             "total_time_spent",
             "created_at",
             "updated_at",
+            "audio_url",
         )
 
     def get_served_by_name(self, obj):
@@ -173,6 +175,14 @@ class TicketSerializer(serializers.ModelSerializer):
             }
             for i, item in enumerate(obj.services_data)
         ]
+
+    def get_audio_url(self, obj):
+        if not obj.ticket_audio:
+            return None
+        request = self.context.get("request")
+        if request:
+            return request.build_absolute_uri(obj.ticket_audio.url)
+        return obj.ticket_audio.url
 
 
 # ---------------------------------------------------------------------------

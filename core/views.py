@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
@@ -40,21 +40,43 @@ _SERVICE_TYPE_TO_DEPOSIT_MODEL = {
 # Fields extracted from services_data when auto-creating a deposit record at commit time.
 _DEPOSIT_MODEL_FIELDS = {
     CashDeposit: [
-        "deposit_type", "account_number", "account_name", "amount",
-        "phone_number", "depositor_name", "residential_address",
-        "occupation", "id_type", "nationality",
+        "deposit_type",
+        "account_number",
+        "account_name",
+        "amount",
+        "phone_number",
+        "depositor_name",
+        "residential_address",
+        "occupation",
+        "id_type",
+        "nationality",
     ],
     ChequeDeposit: [
-        "cheque_type", "beneficiary_account_number", "beneficiary_account_name",
-        "cheque_details", "phone_number", "depositor_name",
+        "cheque_type",
+        "beneficiary_account_number",
+        "beneficiary_account_name",
+        "cheque_details",
+        "phone_number",
+        "depositor_name",
     ],
     EZWICHDeposit: [
-        "id_type", "id_number", "ezwich_card_number", "amount",
-        "name", "residential_address", "occupation", "phone_number",
+        "id_type",
+        "id_number",
+        "ezwich_card_number",
+        "amount",
+        "name",
+        "residential_address",
+        "occupation",
+        "phone_number",
     ],
     MobileMoneyDeposit: [
-        "id_type", "id_number", "name", "residential_address",
-        "phone_number", "amount", "occupation",
+        "id_type",
+        "id_number",
+        "name",
+        "residential_address",
+        "phone_number",
+        "amount",
+        "occupation",
     ],
 }
 
@@ -62,6 +84,8 @@ _DEPOSIT_MODEL_FIELDS = {
 def _extract_deposit_fields(service_entry: dict, model_class) -> dict:
     allowed = _DEPOSIT_MODEL_FIELDS.get(model_class, [])
     return {k: service_entry[k] for k in allowed if k in service_entry}
+
+
 from .serializers import (
     CashDepositSerializer,
     ChequeDepositSerializer,
@@ -119,6 +143,53 @@ def _build_service_filter(service_types: list[str]):
         operator.or_,
         (Q(services_data__contains=[{"service_type": st}]) for st in service_types),
     )
+
+
+def _inject_audio_data(data: dict, ticket, counter) -> None:
+    """
+    Generate TTS audio (or retrieve from Redis cache) and embed it as a
+    base64 data URL in the broadcast payload. The TV screen plays directly
+    from memory — no S3 round-trip required.
+    """
+    import base64
+    from .tts import generate_announcement_audio
+
+    audio_bytes = generate_announcement_audio(ticket, counter)
+    if audio_bytes:
+        b64 = base64.b64encode(audio_bytes).decode("ascii")
+        data["audio_data"] = f"data:audio/mpeg;base64,{b64}"
+
+
+def _broadcast_with_audio_background(ticket_data: dict, ticket_uuid: str, counter_uuid: str, branch_uuid: str) -> None:
+    """
+    Spin up a daemon thread that generates TTS audio then broadcasts
+    ticket.called with audio_data embedded. The HTTP response is already
+    returned by the time this runs — the teller gets instant feedback and
+    the TV screen receives the audio a few seconds later.
+    """
+    import threading
+
+    def _run():
+        try:
+            from django.db import connections
+            from .models import Ticket
+            from configuration.models import Counter
+
+            ticket = Ticket.objects.select_related(
+                "branch", "device", "counter", "servced_by"
+            ).get(uuid=ticket_uuid)
+            counter = Counter.objects.get(uuid=counter_uuid)
+
+            broadcast_data = dict(ticket_data)
+            _inject_audio_data(broadcast_data, ticket, counter)
+            _broadcast_queue(branch_uuid, "ticket.called", broadcast_data)
+        except Exception as e:
+            print(f"[tts-thread] error: {e}")
+        finally:
+            from django.db import connections
+            connections.close_all()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _broadcast_queue(branch_uuid: str, event_type: str, ticket_data: dict):
@@ -291,7 +362,9 @@ class TicketViewSet(ModelViewSet):
 
         ticket.refresh_from_db()
         data = TicketSerializer(ticket, context={"request": request}).data
-        _broadcast_queue(str(ticket.branch.uuid), "ticket.called", data)
+        branch_uuid = str(ticket.branch.uuid)
+        # Respond immediately — audio generates in background, TV gets one broadcast with audio
+        _broadcast_with_audio_background(data, str(ticket.uuid), str(counter.uuid), branch_uuid)
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="release")
@@ -332,7 +405,12 @@ class TicketViewSet(ModelViewSet):
         _broadcast_queue(branch_uuid, "ticket.released", ticket_data)
         return Response({"detail": "Ticket released successfully."})
 
-    @action(detail=True, methods=["post"], url_path="commit-t24", permission_classes=[IsAuthenticated])
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="commit-t24",
+        permission_classes=[IsAuthenticated],
+    )
     def commit_t24(self, request, uuid=None):
         """
         POST /core/tickets/{uuid}/commit-t24/
@@ -393,7 +471,9 @@ class TicketViewSet(ModelViewSet):
                         )
                         deposit.served_by = request.user
                         deposit.t24_status = T24Status.COMMITTED
-                        deposit.save(update_fields=["served_by", "t24_status", "updated_at"])
+                        deposit.save(
+                            update_fields=["served_by", "t24_status", "updated_at"]
+                        )
                     except DepositModel.DoesNotExist:
                         pass
                 else:
@@ -408,7 +488,9 @@ class TicketViewSet(ModelViewSet):
                     # The post_save signal writes object_uuid back to the DB copy of
                     # services_data. Mirror it on our local copy so the final ticket.save
                     # below doesn't overwrite it.
-                    ticket.services_data[service_position]["object_uuid"] = str(deposit.uuid)
+                    ticket.services_data[service_position]["object_uuid"] = str(
+                        deposit.uuid
+                    )
 
             # Mark this service committed in the JSON blob
             ticket.services_data[service_position]["t24_committed"] = True
@@ -431,9 +513,7 @@ class TicketViewSet(ModelViewSet):
                     )
                     ticket_update_fields.append("served_time")
 
-                ticket.total_time_spent = int(
-                    (now - ticket.created_at).total_seconds()
-                )
+                ticket.total_time_spent = int((now - ticket.created_at).total_seconds())
                 ticket_update_fields.append("total_time_spent")
 
                 counter = ticket.counter
@@ -457,6 +537,84 @@ class TicketViewSet(ModelViewSet):
                 "message": "Transaction committed to T24 successfully.",
             },
             status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="announce",
+        permission_classes=[IsAuthenticated],
+    )
+    def announce(self, request, uuid=None):
+        """
+        POST /core/tickets/{uuid}/announce/
+        Re-announce a ticket synchronously. Regenerates audio when the counter has
+        changed or no audio exists, then broadcasts ticket.called so TV screens play it.
+        """
+        ticket = self.get_object()
+
+        counter_uuid = request.data.get("counter")
+        counter, err = _resolve_counter(request, counter_uuid)
+        if err:
+            return err
+
+        data = TicketSerializer(ticket, context={"request": request}).data
+        _inject_audio_data(data, ticket, counter)
+        _broadcast_queue(str(ticket.branch.uuid), "ticket.called", data)
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="tv-display",
+        permission_classes=[AllowAny],
+    )
+    def tv_display(self, request):
+        """
+        GET /core/tickets/tv-display/?branch={uuid}
+        Returns branch info, waiting tickets, and TV display config for the branch.
+        No auth required — TV screens are public displays.
+        """
+        from configuration.models import Branch, BranchTVConfig
+        from configuration.serializers import BranchSerializer, BranchTVConfigSerializer
+        from django.utils import timezone
+
+        branch_uuid = request.query_params.get("branch")
+        if not branch_uuid:
+            return Response(
+                {"detail": "branch query param is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            branch = Branch.objects.get(uuid=branch_uuid, is_active=True)
+        except Branch.DoesNotExist:
+            return Response(
+                {"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        tv_config, _ = BranchTVConfig.objects.get_or_create(branch=branch)
+
+        waiting_tickets = (
+            Ticket.objects.select_related("branch", "device", "counter", "servced_by")
+            .filter(
+                branch=branch,
+                status=TicketStatus.WAITING,
+                created_at__date=timezone.localdate(),
+            )
+            .order_by("created_at")
+        )
+
+        return Response(
+            {
+                "branch": BranchSerializer(branch).data,
+                "waiting_tickets": TicketSerializer(
+                    waiting_tickets, many=True, context={"request": request}
+                ).data,
+                "tv_config": BranchTVConfigSerializer(
+                    tv_config, context={"request": request}
+                ).data,
+            }
         )
 
 

@@ -10,10 +10,13 @@ from rest_framework_simplejwt.exceptions import TokenError
 from accounts.permissions import IsSystemUser, ModelPermissions
 from helpers import exceptions
 from .filters import BranchFilter, CounterFilter, DeviceFilter, MainServiceFilter, ServiceFilter
-from .models import Branch, Device, MainService, Service, Counter
+from .models import Branch, Device, MainService, Service, Counter, SystemVoiceConfig, BranchVoiceConfig, BranchTVConfig, TVAdvertisement
 from .permissions import IsDevice
+from rest_framework.parsers import MultiPartParser, JSONParser, FormParser
 from .serializers import (
     BranchSerializer,
+    BranchTVConfigSerializer,
+    BranchVoiceConfigSerializer,
     BranchWriteSerializer,
     CounterSerializer,
     CounterWriteSerializer,
@@ -24,6 +27,9 @@ from .serializers import (
     MainServiceSerializer,
     ServiceSerializer,
     ServiceWriteSerializer,
+    SystemVoiceConfigSerializer,
+    TVAdvertisementSerializer,
+    TVAdvertisementWriteSerializer,
 )
 from .tokens import DeviceRefreshToken
 
@@ -250,3 +256,130 @@ class CounterViewSet(ModelViewSet):
         write_serializer.is_valid(raise_exception=True)
         instance = write_serializer.save()
         return Response(CounterSerializer(instance).data)
+
+
+class SystemVoiceConfigView(APIView):
+    permission_classes = [IsSystemUser]
+
+    def get(self, request):
+        config = SystemVoiceConfig.get_solo()
+        return Response(SystemVoiceConfigSerializer(config).data)
+
+    def put(self, request):
+        config = SystemVoiceConfig.get_solo()
+        s = SystemVoiceConfigSerializer(config, data=request.data, partial=True)
+        s.is_valid(raise_exception=True)
+        s.save()
+        config.refresh_from_db()
+        return Response(SystemVoiceConfigSerializer(config).data)
+
+
+class BranchVoiceConfigView(APIView):
+    permission_classes = [IsSystemUser]
+    parser_classes = [JSONParser, FormParser]
+
+    def _get_branch(self, branch_uuid):
+        try:
+            return Branch.objects.get(uuid=branch_uuid)
+        except Branch.DoesNotExist:
+            return None
+
+    def get(self, request, branch_uuid):
+        branch = self._get_branch(branch_uuid)
+        if not branch:
+            return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+        config, _ = BranchVoiceConfig.objects.get_or_create(branch=branch)
+        return Response(BranchVoiceConfigSerializer(config, context={"request": request}).data)
+
+    def put(self, request, branch_uuid):
+        branch = self._get_branch(branch_uuid)
+        if not branch:
+            return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+        config, _ = BranchVoiceConfig.objects.get_or_create(branch=branch)
+        s = BranchVoiceConfigSerializer(config, data=request.data, partial=True, context={"request": request})
+        s.is_valid(raise_exception=True)
+        s.save()
+        config.refresh_from_db()
+        return Response(BranchVoiceConfigSerializer(config, context={"request": request}).data)
+
+
+class BranchTVConfigView(APIView):
+    permission_classes = [IsSystemUser]
+    parser_classes = [MultiPartParser, JSONParser, FormParser]
+
+    def _get_branch(self, branch_uuid):
+        try:
+            return Branch.objects.get(uuid=branch_uuid)
+        except Branch.DoesNotExist:
+            return None
+
+    def get(self, request, branch_uuid):
+        branch = self._get_branch(branch_uuid)
+        if not branch:
+            return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+        config, _ = BranchTVConfig.objects.get_or_create(branch=branch)
+        return Response(BranchTVConfigSerializer(config, context={"request": request}).data)
+
+    def put(self, request, branch_uuid):
+        branch = self._get_branch(branch_uuid)
+        if not branch:
+            return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+        config, _ = BranchTVConfig.objects.get_or_create(branch=branch)
+        s = BranchTVConfigSerializer(config, data=request.data, partial=True, context={"request": request})
+        s.is_valid(raise_exception=True)
+        s.save()
+        config.refresh_from_db()
+        return Response(BranchTVConfigSerializer(config, context={"request": request}).data)
+
+
+class BranchTVAdsView(APIView):
+    """
+    POST   /configuration/branches/{uuid}/tv-config/ads/   — upload a new ad (image or video)
+    DELETE /configuration/branches/{uuid}/tv-config/ads/{ad_id}/ — remove an ad
+    PATCH  /configuration/branches/{uuid}/tv-config/ads/{ad_id}/ — update order
+    """
+    permission_classes = [IsSystemUser]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def _get_config(self, branch_uuid):
+        try:
+            branch = Branch.objects.get(uuid=branch_uuid)
+        except Branch.DoesNotExist:
+            return None, None
+        config, _ = BranchTVConfig.objects.get_or_create(branch=branch)
+        return branch, config
+
+    def post(self, request, branch_uuid):
+        _, config = self._get_config(branch_uuid)
+        if config is None:
+            return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+        s = TVAdvertisementWriteSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        ad = s.save(tv_config=config)
+        return Response(TVAdvertisementSerializer(ad, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+    def delete(self, request, branch_uuid, ad_id):
+        _, config = self._get_config(branch_uuid)
+        if config is None:
+            return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            ad = TVAdvertisement.objects.get(pk=ad_id, tv_config=config)
+        except TVAdvertisement.DoesNotExist:
+            return Response({"detail": "Ad not found."}, status=status.HTTP_404_NOT_FOUND)
+        ad.file.delete(save=False)
+        ad.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def patch(self, request, branch_uuid, ad_id):
+        _, config = self._get_config(branch_uuid)
+        if config is None:
+            return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            ad = TVAdvertisement.objects.get(pk=ad_id, tv_config=config)
+        except TVAdvertisement.DoesNotExist:
+            return Response({"detail": "Ad not found."}, status=status.HTTP_404_NOT_FOUND)
+        order = request.data.get("order")
+        if order is not None:
+            ad.order = int(order)
+            ad.save(update_fields=["order"])
+        return Response(TVAdvertisementSerializer(ad, context={"request": request}).data)

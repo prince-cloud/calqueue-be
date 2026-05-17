@@ -1,3 +1,4 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 from . import views
 
@@ -16,4 +17,10 @@ router.register(
     basename="mobile-money-deposit",
 )
 
-urlpatterns = router.urls
+urlpatterns = router.urls + [
+    path(
+        "verification/ghana-card/",
+        views.GhanaCardVerificationView.as_view(),
+        name="ghana-card-verification",
+    ),
+]

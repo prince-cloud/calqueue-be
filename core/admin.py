@@ -7,6 +7,7 @@ from .models import (
     EZWICHDeposit,
     MobileMoneyDeposit,
     Ticket,
+    Verification,
 )
 
 BASE_READONLY = ("uuid", "created_at", "updated_at")
@@ -39,6 +40,14 @@ class TicketAdmin(ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+
+@admin.register(Verification)
+class VerificationAdmin(ModelAdmin):
+    list_display = ("card_number", "verified", "created_at")
+    list_filter = ("verified", "created_at")
+    search_fields = ("card_number",)
+    # readonly_fields = ("uuid", "card_number", "image", "verified", "data", "created_at")
 
 
 @admin.register(CashDeposit)

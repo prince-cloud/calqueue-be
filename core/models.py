@@ -12,12 +12,12 @@ from configuration.models import Branch, Counter, Device
 
 def _generate_reference() -> str:
     chars = string.ascii_uppercase + string.digits
-    suffix = ''.join(random.choices(chars, k=6))
+    suffix = "".join(random.choices(chars, k=6))
     return f"REF{timezone.now().strftime('%Y%m%d')}{suffix}"
 
 
 def _generate_t24_reference() -> str:
-    digits = ''.join(random.choices(string.digits, k=8))
+    digits = "".join(random.choices(string.digits, k=8))
     return f"FT{digits}"
 
 
@@ -28,7 +28,9 @@ class T24Status(models.TextChoices):
 
 
 class T24ReferenceMixin(models.Model):
-    t24_reference = models.CharField(max_length=10, unique=True, null=True, blank=True, db_index=True)
+    t24_reference = models.CharField(
+        max_length=10, unique=True, null=True, blank=True, db_index=True
+    )
     t24_status = models.CharField(
         max_length=20,
         choices=T24Status.choices,
@@ -57,6 +59,7 @@ class T24ReferenceMixin(models.Model):
 
 class TicketStatus(models.TextChoices):
     WAITING = "WAITING", "Waiting"
+    CALLED = "CALLED", "Called"
     ON_GOING = "ON_GOING", "On going"
     ON_HOLD = "ON_HOLD", "On hold"
     COMPLETED = "COMPLETED", "Completed"
@@ -72,7 +75,9 @@ class Ticket(models.Model):
 
     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     ticket_number = models.CharField(max_length=20, db_index=True)
-    reference_number = models.CharField(max_length=20, unique=True, null=True, blank=True, db_index=True)
+    reference_number = models.CharField(
+        max_length=20, unique=True, null=True, blank=True, db_index=True
+    )
 
     branch = models.ForeignKey(
         Branch,
@@ -129,6 +134,15 @@ class Ticket(models.Model):
         blank=True,
         help_text="When serving started at the counter.",
     )
+    hold_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the current hold period started.",
+    )
+    total_hold_seconds = models.PositiveIntegerField(
+        default=0,
+        help_text="Total accumulated hold time in seconds across all holds.",
+    )
     served_time = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -148,6 +162,11 @@ class Ticket(models.Model):
         default=0,
         help_text="Number of services that have had their model object created.",
     )
+    verification_data = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Ghana Card / NIA verification result linked at ticket creation.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -157,11 +176,17 @@ class Ticket(models.Model):
         constraints = []
         indexes = [
             # Most reports filter by branch + date range
-            models.Index(fields=["branch", "created_at"], name="ticket_branch_date_idx"),
+            models.Index(
+                fields=["branch", "created_at"], name="ticket_branch_date_idx"
+            ),
             # Performance / status reports filter by status + date
-            models.Index(fields=["status", "created_at"], name="ticket_status_date_idx"),
+            models.Index(
+                fields=["status", "created_at"], name="ticket_status_date_idx"
+            ),
             # Teller performance queries
-            models.Index(fields=["servced_by", "status"], name="ticket_teller_status_idx"),
+            models.Index(
+                fields=["servced_by", "status"], name="ticket_teller_status_idx"
+            ),
             # GIN index enables fast JSON containment queries on services_data
             GinIndex(fields=["services_data"], name="ticket_services_data_gin_idx"),
         ]
@@ -191,6 +216,42 @@ class Ticket(models.Model):
             f"{self.branch.code} — {self.ticket_number} ({self.get_status_display()})"
         )
 
+
+# ---------------------------------------------------------------------------
+# Ghana Card / NIA verification record
+# ---------------------------------------------------------------------------
+
+
+class Verification(models.Model):
+    """
+    Persists the NIA face-match result captured at the kiosk before the
+    ticket is created.  The ticket serializer links the most recent record
+    (within 10 min) to the ticket at creation time.
+    """
+
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    card_number = models.CharField(max_length=50, db_index=True)
+    image = models.ImageField(upload_to="verification_faces/", null=True, blank=True)
+    verified = models.BooleanField(default=False)
+    data = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Raw response payload from the NIA API.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["card_number", "created_at"],
+                name="verification_card_date_idx",
+            ),
+        ]
+
+    def __str__(self):
+        status = "verified" if self.verified else "unverified"
+        return f"{self.card_number} — {status} ({self.created_at:%Y-%m-%d %H:%M})"
 
 
 # ---------------------------------------------------------------------------

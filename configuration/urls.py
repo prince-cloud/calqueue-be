@@ -18,6 +18,7 @@ urlpatterns = [
     path("device/token/refresh/", views.DeviceTokenRefreshView.as_view(), name="device-token-refresh"),
     path("device/me/", views.DeviceProfileView.as_view(), name="device-profile"),
     path("voice-config/", views.SystemVoiceConfigView.as_view(), name="system-voice-config"),
+    path("voice-config/preview/", views.VoicePreviewView.as_view(), name="voice-config-preview"),
     path("branches/<uuid:branch_uuid>/voice-config/", views.BranchVoiceConfigView.as_view(), name="branch-voice-config"),
     path("branches/<uuid:branch_uuid>/tv-config/", views.BranchTVConfigView.as_view(), name="branch-tv-config"),
     path("branches/<uuid:branch_uuid>/tv-config/ads/", views.BranchTVAdsView.as_view(), name="branch-tv-ads"),

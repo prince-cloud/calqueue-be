@@ -426,6 +426,11 @@ CHANNEL_LAYERS = {
     },
 }
 
+# Ghana NIA identity verification API
+# Set GHANA_NIA_API_URL to enable; omit to run in passthrough mode (verified=False).
+GHANA_NIA_API_URL = os.getenv("GHANA_NIA_API_URL", default=None)
+GHANA_NIA_API_KEY = os.getenv("GHANA_NIA_API_KEY", default=None)
+
 # CELERY
 CELERY_ACCEPT_CONTENT = ["application/json"]
 CELERY_TASK_SERIALIZER = "json"

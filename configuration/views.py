@@ -303,6 +303,51 @@ class BranchVoiceConfigView(APIView):
         return Response(BranchVoiceConfigSerializer(config, context={"request": request}).data)
 
 
+class VoicePreviewView(APIView):
+    """
+    POST /configuration/voice-config/preview/
+    Generate a short TTS clip with the supplied settings so the user can
+    hear the voice and speed before saving.  Returns raw MP3 bytes.
+    """
+    permission_classes = [IsSystemUser]
+    _SAMPLE = "Ticket A 0 0 1, please proceed to Counter One. Thank you."
+
+    def post(self, request):
+        from django.http import HttpResponse
+        from core.tts import _generate_edge_tts, _generate_gtts
+        from .models import TTSEngine
+
+        engine = request.data.get("engine", TTSEngine.EDGE_TTS)
+        template = (request.data.get("announcement_template") or "").strip()
+        text = (
+            template.format(
+                ticket_number="A 0 0 1",
+                counter_name="Counter One",
+                branch_name="Main Branch",
+            )
+            if template
+            else self._SAMPLE
+        )
+
+        try:
+            if engine == TTSEngine.EDGE_TTS:
+                voice = request.data.get("voice") or "en-US-GuyNeural"
+                rate = request.data.get("rate") or "+0%"
+                audio = _generate_edge_tts(text, voice, rate)
+            else:
+                language = request.data.get("language") or "en"
+                tld = request.data.get("tld") or "com"
+                slow = bool(request.data.get("slow", False))
+                audio = _generate_gtts(text, language, tld, slow)
+        except Exception as exc:
+            return Response(
+                {"detail": f"TTS generation failed: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return HttpResponse(audio, content_type="audio/mpeg")
+
+
 class BranchTVConfigView(APIView):
     permission_classes = [IsSystemUser]
     parser_classes = [MultiPartParser, JSONParser, FormParser]

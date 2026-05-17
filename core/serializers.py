@@ -9,6 +9,7 @@ from .models import (
     EZWICHDeposit,
     MobileMoneyDeposit,
     Ticket,
+    Verification,
 )
 
 _VALID_SERVICE_TYPES = set(ServiceTypes.values)
@@ -84,6 +85,7 @@ class TicketWriteSerializer(serializers.Serializer):
     id_type = serializers.CharField(max_length=50)
     signature = serializers.ImageField(required=False, allow_null=True)
     services = _ServicesField()
+    verification_uuid = serializers.UUIDField(required=False, allow_null=True)
 
     def validate_device(self, value):
         try:
@@ -106,6 +108,7 @@ class TicketWriteSerializer(serializers.Serializer):
     def create(self, validated_data):
         service_items = validated_data.pop("services")
         branch = validated_data.pop("branch")
+        verification_uuid = validated_data.pop("verification_uuid", None)
 
         # Lock the branch row so concurrent ticket creations for the same
         # branch queue behind each other, preventing duplicate ticket numbers.
@@ -117,7 +120,31 @@ class TicketWriteSerializer(serializers.Serializer):
             services_data=service_items,
             **validated_data,
         )
+
+        _attach_verification(ticket, verification_uuid)
+
         return ticket
+
+
+def _attach_verification(ticket: Ticket, verification_uuid) -> None:
+    """
+    Look up the Verification record by its UUID and copy the result onto the
+    ticket. The UUID is returned to the Flutter app at capture time and passed
+    back at ticket creation — one UUID, one record, zero ambiguity regardless
+    of how many devices, branches, or customers are active simultaneously.
+    Silently skips if no UUID is provided or the record is not found.
+    """
+    if not verification_uuid:
+        return
+    try:
+        record = Verification.objects.get(uuid=verification_uuid)
+        ticket.verification_data = {
+            "verified": record.verified,
+            **(record.data or {}),
+        }
+        ticket.save(update_fields=["verification_data"])
+    except Exception:
+        pass  # Never let a verification lookup block ticket creation
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +177,12 @@ class TicketSerializer(serializers.ModelSerializer):
             "counter_name",
             "served_by_name",
             "services",
+            "verification_data",
             "waiting_time",
             "called_time",
             "start_serve_time",
+            "hold_started_at",
+            "total_hold_seconds",
             "served_time",
             "total_time_spent",
             "created_at",

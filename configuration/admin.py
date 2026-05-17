@@ -1,7 +1,18 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin, TabularInline
 
-from .models import Branch, BranchWorkingHours, Counter, Device, MainService, Service
+from .models import (
+    Branch,
+    BranchTVConfig,
+    BranchVoiceConfig,
+    BranchWorkingHours,
+    Counter,
+    Device,
+    MainService,
+    Service,
+    SystemVoiceConfig,
+    TVAdvertisement,
+)
 
 
 class BranchWorkingHoursInline(TabularInline):
@@ -58,3 +69,46 @@ class CounterAdmin(ModelAdmin):
     list_filter = ("is_active", "is_backoffice", "counter_type", "branch")
     search_fields = ("counter_name", "counter_code")
     readonly_fields = ("uuid", "created_at", "updated_at")
+
+
+@admin.register(SystemVoiceConfig)
+class SystemVoiceConfigAdmin(ModelAdmin):
+    list_display = ("engine", "voice", "rate", "language", "slow", "updated_at")
+    readonly_fields = ("updated_at",)
+
+    def has_add_permission(self, request):
+        return not SystemVoiceConfig.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(BranchVoiceConfig)
+class BranchVoiceConfigAdmin(ModelAdmin):
+    list_display = ("branch", "engine", "voice", "rate", "language", "slow", "updated_at")
+    list_filter = ("engine", "branch")
+    search_fields = ("branch__name", "voice")
+    readonly_fields = ("updated_at",)
+
+
+class TVAdvertisementInline(TabularInline):
+    model = TVAdvertisement
+    extra = 0
+    fields = ("media_type", "file", "order")
+    ordering = ("order", "created_at")
+
+
+@admin.register(BranchTVConfig)
+class BranchTVConfigAdmin(ModelAdmin):
+    list_display = ("branch", "show_ads", "updated_at")
+    list_filter = ("show_ads",)
+    search_fields = ("branch__name",)
+    readonly_fields = ("updated_at",)
+    inlines = (TVAdvertisementInline,)
+
+
+@admin.register(TVAdvertisement)
+class TVAdvertisementAdmin(ModelAdmin):
+    list_display = ("tv_config", "media_type", "order", "created_at")
+    list_filter = ("media_type",)
+    readonly_fields = ("created_at",)

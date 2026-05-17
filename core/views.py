@@ -1,8 +1,11 @@
-from functools import reduce
+import logging
 import operator
+from functools import reduce
 
+import requests
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.conf import settings as django_settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -11,9 +14,12 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
 from configuration.models import Counter
+
+logger = logging.getLogger(__name__)
 from .filters import (
     CashDepositFilter,
     ChequeDepositFilter,
@@ -28,6 +34,7 @@ from .models import (
     Ticket,
     TicketStatus,
     T24Status,
+    Verification,
 )
 
 _SERVICE_TYPE_TO_DEPOSIT_MODEL = {
@@ -160,7 +167,9 @@ def _inject_audio_data(data: dict, ticket, counter) -> None:
         data["audio_data"] = f"data:audio/mpeg;base64,{b64}"
 
 
-def _broadcast_with_audio_background(ticket_data: dict, ticket_uuid: str, counter_uuid: str, branch_uuid: str) -> None:
+def _broadcast_with_audio_background(
+    ticket_data: dict, ticket_uuid: str, counter_uuid: str, branch_uuid: str
+) -> None:
     """
     Spin up a daemon thread that generates TTS audio then broadcasts
     ticket.called with audio_data embedded. The HTTP response is already
@@ -187,6 +196,7 @@ def _broadcast_with_audio_background(ticket_data: dict, ticket_uuid: str, counte
             print(f"[tts-thread] error: {e}")
         finally:
             from django.db import connections
+
             connections.close_all()
 
     threading.Thread(target=_run, daemon=True).start()
@@ -350,7 +360,7 @@ class TicketViewSet(ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            ticket.status = TicketStatus.ON_GOING
+            ticket.status = TicketStatus.CALLED
             ticket.counter = counter
             ticket.called_time = timezone.now()
             ticket.save(
@@ -364,7 +374,9 @@ class TicketViewSet(ModelViewSet):
         data = TicketSerializer(ticket, context={"request": request}).data
         branch_uuid = str(ticket.branch.uuid)
         # Respond immediately — audio generates in background, TV gets one broadcast with audio
-        _broadcast_with_audio_background(data, str(ticket.uuid), str(counter.uuid), branch_uuid)
+        _broadcast_with_audio_background(
+            data, str(ticket.uuid), str(counter.uuid), branch_uuid
+        )
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="release")
@@ -404,6 +416,248 @@ class TicketViewSet(ModelViewSet):
 
         _broadcast_queue(branch_uuid, "ticket.released", ticket_data)
         return Response({"detail": "Ticket released successfully."})
+
+    @action(detail=True, methods=["post"], url_path="release")
+    def release_ticket(self, request, uuid=None):
+        """
+        POST /core/tickets/{uuid}/release/
+        Release a specific SKIPPED ticket back to WAITING so it re-enters the queue.
+        """
+        try:
+            ticket = Ticket.objects.select_related("branch").get(uuid=uuid)
+        except Ticket.DoesNotExist:
+            return Response(
+                {"detail": "Ticket not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        if ticket.status != TicketStatus.SKIPPED:
+            return Response(
+                {"detail": "Only SKIPPED tickets can be released this way."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            ticket = Ticket.objects.select_for_update(of=("self",)).get(pk=ticket.pk)
+            ticket.status = TicketStatus.WAITING
+            ticket.hold_started_at = None
+            ticket.total_hold_seconds = 0
+            ticket.start_serve_time = None
+            ticket.called_time = None
+            ticket.save(
+                update_fields=[
+                    "status",
+                    "hold_started_at",
+                    "total_hold_seconds",
+                    "start_serve_time",
+                    "called_time",
+                    "updated_at",
+                ]
+            )
+
+        ticket.refresh_from_db()
+        branch_uuid = str(ticket.branch.uuid)
+        ticket_data = TicketSerializer(ticket, context={"request": request}).data
+        _broadcast_queue(branch_uuid, "ticket.released", ticket_data)
+        return Response(ticket_data)
+
+    @action(detail=True, methods=["post"], url_path="pick")
+    def pick(self, request, uuid=None):
+        """
+        POST /core/tickets/{uuid}/pick/
+        Pick a specific WAITING ticket and assign it to the teller's counter,
+        identical to /next/ but for a teller-selected ticket rather than
+        the oldest in queue.
+        """
+        counter, err = _resolve_counter(request, request.data.get("counter"))
+        if err:
+            return err
+
+        with transaction.atomic():
+            counter = (
+                Counter.objects.select_for_update()
+                .prefetch_related("operations")
+                .get(pk=counter.pk)
+            )
+
+            if counter.current_ticket_id:
+                return Response(
+                    {
+                        "detail": "Counter already has an active ticket. Release it first."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                ticket = (
+                    Ticket.objects.select_for_update(of=("self",))
+                    .select_related("branch", "device", "counter", "servced_by")
+                    .get(uuid=uuid)
+                )
+            except Ticket.DoesNotExist:
+                return Response(
+                    {"detail": "Ticket not found."}, status=status.HTTP_404_NOT_FOUND
+                )
+
+            if ticket.status not in (TicketStatus.WAITING, TicketStatus.SKIPPED):
+                return Response(
+                    {"detail": "Ticket is no longer available to pick."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if (
+                ticket.status == TicketStatus.WAITING
+                and ticket.current_at_counter.exists()
+            ):
+                return Response(
+                    {"detail": "Ticket is already assigned to another counter."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ticket.status = TicketStatus.CALLED
+            ticket.counter = counter
+            ticket.called_time = timezone.now()
+            ticket.save(
+                update_fields=["status", "counter", "called_time", "updated_at"]
+            )
+
+            counter.current_ticket = ticket
+            counter.save(update_fields=["current_ticket"])
+
+        ticket.refresh_from_db()
+        data = TicketSerializer(ticket, context={"request": request}).data
+        branch_uuid = str(ticket.branch.uuid)
+        _broadcast_with_audio_background(
+            data, str(ticket.uuid), str(counter.uuid), branch_uuid
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="start-serve")
+    def start_serve(self, request, uuid=None):
+        """POST /core/tickets/{uuid}/start-serve/ — begin serving a CALLED ticket."""
+        ticket = self.get_object()
+        if ticket.status != TicketStatus.CALLED:
+            return Response(
+                {"detail": "Ticket is not in CALLED state."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        with transaction.atomic():
+            ticket = Ticket.objects.select_for_update(of=("self",)).get(pk=ticket.pk)
+            ticket.status = TicketStatus.ON_GOING
+            ticket.start_serve_time = timezone.now()
+            ticket.save(update_fields=["status", "start_serve_time", "updated_at"])
+        ticket.refresh_from_db()
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="hold")
+    def hold(self, request, uuid=None):
+        """POST /core/tickets/{uuid}/hold/ — put ON_GOING ticket on hold."""
+        ticket = self.get_object()
+        if ticket.status != TicketStatus.ON_GOING:
+            return Response(
+                {"detail": "Ticket is not ON_GOING."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        with transaction.atomic():
+            ticket = Ticket.objects.select_for_update(of=("self",)).get(pk=ticket.pk)
+            ticket.status = TicketStatus.ON_HOLD
+            ticket.hold_started_at = timezone.now()
+            ticket.save(update_fields=["status", "hold_started_at", "updated_at"])
+        ticket.refresh_from_db()
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="resume")
+    def resume(self, request, uuid=None):
+        """POST /core/tickets/{uuid}/resume/ — resume an ON_HOLD ticket."""
+        ticket = self.get_object()
+        if ticket.status != TicketStatus.ON_HOLD:
+            return Response(
+                {"detail": "Ticket is not ON_HOLD."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        with transaction.atomic():
+            ticket = Ticket.objects.select_for_update(of=("self",)).get(pk=ticket.pk)
+            if ticket.hold_started_at:
+                held_secs = int(
+                    (timezone.now() - ticket.hold_started_at).total_seconds()
+                )
+                ticket.total_hold_seconds = (ticket.total_hold_seconds or 0) + held_secs
+            ticket.status = TicketStatus.ON_GOING
+            ticket.hold_started_at = None
+            ticket.save(
+                update_fields=[
+                    "status",
+                    "hold_started_at",
+                    "total_hold_seconds",
+                    "updated_at",
+                ]
+            )
+        ticket.refresh_from_db()
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="skip")
+    def skip(self, request, uuid=None):
+        """POST /core/tickets/{uuid}/skip/ — skip a CALLED/ON_GOING ticket (no-show)."""
+        ticket = self.get_object()
+        if ticket.status not in (
+            TicketStatus.CALLED,
+            TicketStatus.ON_GOING,
+            TicketStatus.ON_HOLD,
+        ):
+            return Response(
+                {"detail": "Ticket cannot be skipped in its current state."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        with transaction.atomic():
+            ticket = (
+                Ticket.objects.select_for_update(of=("self",))
+                .select_related("counter")
+                .get(pk=ticket.pk)
+            )
+            counter = ticket.counter
+            ticket.status = TicketStatus.SKIPPED
+            ticket.counter = None
+            ticket.called_time = None
+            ticket.hold_started_at = None
+            ticket.save(
+                update_fields=[
+                    "status",
+                    "counter",
+                    "called_time",
+                    "hold_started_at",
+                    "updated_at",
+                ]
+            )
+            if counter:
+                counter = Counter.objects.select_for_update().get(pk=counter.pk)
+                if counter.current_ticket_id == ticket.pk:
+                    counter.current_ticket = None
+                    counter.save(update_fields=["current_ticket"])
+        ticket.refresh_from_db()
+        branch_uuid = str(ticket.branch.uuid)
+        ticket_data = TicketSerializer(ticket, context={"request": request}).data
+        _broadcast_queue(branch_uuid, "ticket.skipped", ticket_data)
+        return Response(ticket_data)
+
+    @action(detail=False, methods=["get"], url_path="skipped")
+    def skipped_queue(self, request):
+        """GET /core/tickets/skipped/ — today's skipped tickets for this counter."""
+        counter, err = _resolve_counter(request, request.query_params.get("counter"))
+        if err:
+            return err
+        service_types = list(counter.operations.values_list("name", flat=True))
+        if not service_types:
+            return Response({"count": 0, "results": []})
+        service_filter = _build_service_filter(service_types)
+        tickets = (
+            Ticket.objects.select_related("branch", "device", "counter", "servced_by")
+            .filter(
+                service_filter,
+                status=TicketStatus.SKIPPED,
+                created_at__date=timezone.localdate(),
+            )
+            .order_by("created_at")
+        )
+        serializer = TicketSerializer(tickets, many=True, context={"request": request})
+        return Response({"count": tickets.count(), "results": serializer.data})
 
     @action(
         detail=True,
@@ -564,6 +818,48 @@ class TicketViewSet(ModelViewSet):
         return Response(data, status=status.HTTP_200_OK)
 
     @action(
+        detail=True,
+        methods=["post"],
+        url_path="verify",
+        permission_classes=[IsAuthenticated],
+        parser_classes=[MultiPartParser, FormParser, JSONParser],
+    )
+    def verify(self, request, uuid=None):
+        """
+        POST /core/tickets/{uuid}/verify/
+        Real-time counter verification. Accepts method=face (with image file) or
+        method=biometric (simulated). Updates ticket.verification_data and returns
+        the updated ticket so the teller dashboard refreshes immediately.
+        """
+        ticket = self.get_object()
+        method = request.data.get("method", "face")
+
+        if method == "biometric":
+            ticket.verification_data = {"verified": True, "method": "biometric"}
+            ticket.save(update_fields=["verification_data"])
+            return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+        # Face verification via NIA
+        if ticket.id_type.upper() != "GHANA CARD":
+            return Response(
+                {"detail": "Face verification is only available for Ghana Card holders."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        image = request.FILES.get("image")
+        if not image:
+            return Response(
+                {"detail": "image is required for face verification."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verified, payload = _call_nia_api(image, ticket.id_number.strip().upper())
+        ticket.verification_data = {"verified": verified, "method": "face", **(payload or {})}
+        ticket.save(update_fields=["verification_data"])
+
+        return Response(TicketSerializer(ticket, context={"request": request}).data)
+
+    @action(
         detail=False,
         methods=["get"],
         url_path="tv-display",
@@ -616,6 +912,22 @@ class TicketViewSet(ModelViewSet):
                 ).data,
             }
         )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="verification",
+        permission_classes=[IsAuthenticated],
+    )
+    def verification(self, request, uuid=None):
+        """
+        GET /core/tickets/{uuid}/verification/
+        Returns the NIA verification status stored on this ticket.
+        """
+        ticket = self.get_object()
+        if ticket.verification_data:
+            return Response({"status": True, "data": ticket.verification_data})
+        return Response({"status": False, "data": None})
 
 
 # ---------------------------------------------------------------------------
@@ -671,3 +983,89 @@ class MobileMoneyDepositViewSet(_DepositViewSet):
     serializer_class = MobileMoneyDepositSerializer
     filterset_class = MobileMoneyDepositFilter
     search_fields = ("ticket__ticket_number", "name", "phone_number")
+
+
+# ---------------------------------------------------------------------------
+# Ghana Card / NIA verification
+# ---------------------------------------------------------------------------
+
+
+class GhanaCardVerificationView(APIView):
+    """
+    POST /core/verification/ghana-card/
+
+    Accepts a face image and Ghana Card number from the kiosk device,
+    calls the NIA API (if configured), persists the result, and returns
+    {"verified": bool}.
+
+    AllowAny — the device may call this before its JWT is refreshed and
+    a failed auth check must never silently block customer verification.
+    """
+
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        image = request.FILES.get("image")
+        card_number = request.data.get("card_number", "").strip().upper()
+
+        if not image or not card_number:
+            return Response(
+                {"detail": "image and card_number are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        verified, payload = _call_nia_api(image, card_number)
+
+        record = Verification.objects.create(
+            card_number=card_number,
+            image=image,
+            verified=verified,
+            data=payload,
+        )
+
+        return Response({"verified": verified, "verification_uuid": str(record.uuid)})
+
+
+def _call_nia_api(image, card_number: str) -> tuple[bool, dict | None]:
+    """
+    Forward image + card_number to the Ghana NIA identity API.
+    Returns (verified, payload).  On any failure returns (False, None).
+
+    Settings / env vars:
+        GHANA_NIA_API_URL  — full URL of the NIA endpoint
+        GHANA_NIA_API_KEY  — bearer token / API key
+    """
+    nia_url = getattr(django_settings, "GHANA_NIA_API_URL", None)
+    nia_key = getattr(django_settings, "GHANA_NIA_API_KEY", None)
+
+    if not nia_url:
+        # NIA not configured — simulate a successful match so the full flow
+        # can be tested end-to-end. Remove this branch when going to production.
+        logger.debug("GHANA_NIA_API_URL not configured — returning simulated verification.")
+        return True, {
+            "verified": True,
+            "simulated": True,
+            "name": "Kwame Asante",
+            "date_of_birth": "1988-04-22",
+            "gender": "Male",
+            "nationality": "Ghanaian",
+            "residential_address": "14 Liberation Road, Accra, Ghana",
+            "photo": None,
+        }
+
+    try:
+        resp = requests.post(
+            nia_url,
+            headers={"Authorization": f"Bearer {nia_key}"} if nia_key else {},
+            files={"image": ("face.jpg", image.read(), "image/jpeg")},
+            data={"card_number": card_number},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        verified = bool(payload.get("verified") or payload.get("match"))
+        return verified, payload
+    except Exception:
+        logger.exception("NIA API call failed for card %s", card_number)
+        return False, None

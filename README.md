@@ -1,123 +1,174 @@
-# Lithium: A Django-Powered Boilerplate
-Lithium is a batteries-included Django starter project with everything you need to start coding, including user authentication, static files, default styling, debugging, DRY forms, custom error pages, and more.
+# CalQueue Backend
 
-> This project was formerly known as _DjangoX_ but was renamed to _Lithium_ in November 2024.
+REST API and real-time server for the CalQueue bank branch queue management system. Handles customer ticketing, teller workflows, branch configuration, and live queue events.
 
-https://github.com/user-attachments/assets/8698e9dd-1794-4f96-9c3f-85add17e330b
+## Tech Stack
 
-## 👋 Free Newsletter
-[Sign up for updates](https://buttondown.com/lithiumsaas) to the free and upcoming premium SaaS version!
+| Layer | Technology |
+|---|---|
+| Framework | Django 5.1 + Django REST Framework |
+| Auth | SimpleJWT (user) + custom Device JWT |
+| Real-time | Django Channels + Redis channel layer |
+| Task queue | Celery + Redis |
+| Database | PostgreSQL (SQLite for local dev) |
+| Admin | django-unfold |
+| Package manager | uv |
 
-## 🚀 Features
-- Django 5.1 & Python 3.13
-- Installation via [uv](https://github.com/astral-sh/uv), [Pip](https://pypi.org/project/pip/) or [Docker](https://www.docker.com/)
-- User authentication--log in, sign up, password reset--via [django-allauth](https://github.com/pennersr/django-allauth)
-- Static files configured with [Whitenoise](http://whitenoise.evans.io/en/stable/index.html)
-- Styling with [Bootstrap v5](https://getbootstrap.com/)
-- Debugging with [django-debug-toolbar](https://github.com/jazzband/django-debug-toolbar)
-- DRY forms with [django-crispy-forms](https://github.com/django-crispy-forms/django-crispy-forms)
-- Custom 404, 500, and 403 error pages
+## Getting Started
 
-## Table of Contents
-* **[Installation](#installation)**
-  * [uv](#uv)
-  * [Pip](#pip)
-  * [Docker](#docker)
-* [Next Steps](#next-steps)
-* [Contributing](#contributing)
-* [Support](#support)
-* [License](#license)
+### Prerequisites
 
-## 📖 Installation
-Lithium can be installed via Pip or Docker. To start, clone the repo to your local computer and change into the proper directory.
+- Python 3.13+
+- [uv](https://docs.astral.sh/uv/)
+- Redis
+- PostgreSQL (or set `USE_SQLITE=True` to skip)
 
-```
-$ git clone https://github.com/wsvincent/lithium.git
-$ cd lithium
-```
+### Local Development
 
-### uv
-You can use [uv](https://docs.astral.sh/uv/) to create a dedicated virtual environment.
+```bash
+# Install dependencies
+uv sync
 
-```
-$ uv sync
-```
+# Configure environment
+cp .env.example .env
+# Edit .env — set USE_SQLITE=True to skip Postgres locally
 
-Then run `migrate` to configure the initial database. The command `createsuperuser` will create a new superuser account for accessing the admin. Execute the `runserver` command to start up the local server.
+# Run database migrations
+uv run manage.py migrate
 
-```
-$ uv run manage.py migrate
-$ uv run manage.py createsuperuser
-$ uv run manage.py runserver
-# Load the site at http://127.0.0.1:8000 or http://127.0.0.1:8000/admin for the admin
+# Create an admin user
+uv run manage.py createsuperuser
+
+# Start the dev server (port 8090 by default)
+uv run manage.py runserver 0.0.0.0:8090
 ```
 
-### Pip
-To use Pip, create a new virtual environment and then install all packages hosted in `requirements.txt`. Run `migrate` to configure the initial database. and `createsuperuser` to create a new superuser account for accessing the admin. Execute the `runserver` command to start up the local server.
+### Background Workers
+
+Open separate terminals for each worker:
+
+```bash
+# Celery task worker
+uv run celery -A config worker -l INFO
+
+# Celery beat scheduler (periodic tasks)
+uv run celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+```
+
+### Docker (production-like)
+
+```bash
+docker compose up -d --build
+docker compose exec main python manage.py migrate
+docker compose exec main python manage.py createsuperuser
+```
+
+### Code Quality
+
+Pre-commit hooks enforce formatting and linting on every commit:
+
+```bash
+pre-commit run --all-files   # black + flake8 (max-line-length=150) + migration checks
+```
+
+### Running Tests
+
+```bash
+# All tests
+uv run manage.py test
+
+# Single test
+uv run manage.py test accounts.tests.TestClassName.test_method_name
+```
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `USE_SQLITE` | Set `True` to use SQLite instead of PostgreSQL |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_HOST` / `POSTGRES_PORT` | PostgreSQL connection settings |
+| `REDIS_HOST` / `REDIS_PORT` | Redis connection (required for Channels, Celery, cache) |
+| `USE_S3` | Set `True` to store media files in S3 |
+| `AWS_*` | AWS credentials and bucket config (when `USE_S3=True`) |
+| `SECRET_KEY` | Django secret key |
+| `DEBUG` | Enable Django debug mode |
+| `ALLOWED_HOSTS` | Comma-separated list of allowed hostnames |
+
+Redis uses four separate database indices:
+
+| Index | Purpose |
+|---|---|
+| DB 0 | Django Channels layer |
+| DB 1 | Django cache |
+| DB 2 | Celery broker |
+| DB 3 | Celery result backend |
+
+## Project Structure
 
 ```
-(.venv) $ pip install -r requirements.txt
-(.venv) $ python manage.py migrate
-(.venv) $ python manage.py createsuperuser
-(.venv) $ python manage.py runserver
-# Load the site at http://127.0.0.1:8000 or http://127.0.0.1:8000/admin for the admin
+config/               # Settings, root URLs, Celery config, exception handler
+accounts/             # Custom user model, OTP flows, JWT auth, profile/ID/address
+configuration/        # Branch management, working hours, physical device auth
+core/                 # Banking service catalogue (MainService → Service → SubService)
+pages/                # Static/template views
+helpers/              # Shared utilities: OTP, reference codes, exception classes
 ```
 
-### Docker
+### Django Apps
 
-To use Docker with PostgreSQL as the database update the `DATABASES` section of `config/settings.py` to reflect the following:
+| App | Purpose |
+|---|---|
+| `accounts` | `CustomUser` (extends `AbstractUser`), OTP, JWT auth via `dj-rest-auth`, profile/ID/address endpoints |
+| `configuration` | `Branch`, `BranchWorkingHours`, `Device` model with device-specific JWT tokens |
+| `core` | Service catalogue — `MainService`, `Service`, `SubService` with enforced hierarchy; ticket and queue management |
+| `config` | Settings, Celery, URL root, custom exception handler |
+| `helpers` | OTP generation, reference codes, domain exception classes |
 
-```python
-# config/settings.py
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": "postgres",
-        "USER": "postgres",
-        "PASSWORD": "postgres",
-        "HOST": "db",  # set in docker-compose.yml
-        "PORT": 5432,  # default postgres port
-    }
+## Authentication
+
+Two parallel JWT authentication stacks run side-by-side:
+
+**User JWT** — standard `Bearer` tokens for `CustomUser` via `rest_framework_simplejwt`. Access tokens expire in 5 minutes; refresh tokens last 1 day with rotation and blacklisting.
+
+**Device JWT** — custom `DeviceAccessToken` / `DeviceRefreshToken` types for physical teller kiosk devices. `DeviceJWTAuthentication` checks the `token_type` claim before taking ownership; if it is not `device_access`, it defers to the standard `JWTAuthentication`. Device refresh blacklisting uses Redis rather than the database blacklist table. Use the `IsDevice` permission class to restrict endpoints to devices only.
+
+## API Documentation
+
+The API is self-documented via OpenAPI:
+
+| URL | Interface |
+|---|---|
+| `/api/docs/` | Swagger UI |
+| `/api/redoc/` | Redoc |
+| `/api/schema/` | Raw OpenAPI schema |
+
+### URL Prefix Conventions
+
+| Prefix | App |
+|---|---|
+| `/auth/` | User authentication (`accounts.urls`) |
+| `/configuration/` | Branch and device management (`configuration.urls`) |
+| `/core/` | Queue, ticket, and service endpoints |
+| `/bknd-ctr/` | Django admin |
+
+## Error Handling
+
+All API errors go through `config.exceptions.custom_exception_handler`. Every error response has the shape:
+
+```json
+{
+  "status_code": 400,
+  "errorCode": 101,
+  "errorMsg": "Human-readable message"
 }
 ```
 
-The `INTERNAL_IPS` configuration in `config/settings.py` must be also be updated:
+Raise from `helpers.exceptions` for domain errors; subclass `config.exceptions.BaseException` for generic API errors.
 
-```python
-# config/settings.py
-# django-debug-toolbar
-import socket
-hostname, _, ips = socket.gethostbyname_ex(socket.gethostname())
-INTERNAL_IPS = [ip[:-1] + "1" for ip in ips]
-```
+## Audit Logging
 
-And then proceed to build the Docker image, run the container, and execute the standard commands within Docker.
+`django-auditlog` tracks changes to `CustomUser`, `UserID`, `UserAddress`, `Branch`, `BranchWorkingHours`, and `Device`. Sensitive fields (`password`, `last_login`) are excluded.
 
-```
-$ docker compose up -d --build
-$ docker compose exec web python manage.py migrate
-$ docker compose exec web python manage.py createsuperuser
-# Load the site at http://127.0.0.1:8000 or http://127.0.0.1:8000/admin for the admin
-```
+## Admin
 
-## Next Steps
-
-- Add environment variables. There are multiple packages but I personally prefer [environs](https://pypi.org/project/environs/).
-- Add [gunicorn](https://pypi.org/project/gunicorn/) as the production web server.
-- Update the [EMAIL_BACKEND](https://docs.djangoproject.com/en/4.0/topics/email/#module-django.core.mail) and connect with a mail provider.
-- Make the [admin more secure](https://opensource.com/article/18/1/10-tips-making-django-admin-more-secure).
-- `django-allauth` supports [social authentication](https://django-allauth.readthedocs.io/en/latest/providers.html) if you need that.
-
-I cover all of these steps in tutorials and premium courses over at [LearnDjango.com](https://learndjango.com).
-
-## 🤝 Contributing
-
-Contributions, issues and feature requests are welcome! See [CONTRIBUTING.md](https://github.com/wsvincent/lithium/blob/master/CONTRIBUTING.md).
-
-## ⭐️ Support
-
-Give a ⭐️  if this project helped you!
-
-## License
-
-[The MIT License](LICENSE)
+The admin panel is available at `/bknd-ctr/` and uses `django-unfold` for an improved UI.

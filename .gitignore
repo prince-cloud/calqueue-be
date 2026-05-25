@@ -224,3 +224,6 @@ level-banner/
 challenge_images/
 
 dump.rdb
+
+# Claude Code
+CLAUDE.md

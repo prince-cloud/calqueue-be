@@ -112,7 +112,7 @@ class DeviceRefreshSerializer(serializers.Serializer):
 class ServiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Service
-        fields = ("uuid", "name", "icon", "description", "is_active")
+        fields = ("uuid", "name", "prefix", "icon", "description", "is_active")
 
 
 class ServiceWriteSerializer(serializers.ModelSerializer):
@@ -122,7 +122,7 @@ class ServiceWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Service
-        fields = ("name", "main_service", "icon", "description", "is_active")
+        fields = ("name", "prefix", "main_service", "icon", "description", "is_active")
 
 
 class MainServiceSerializer(serializers.ModelSerializer):
@@ -159,7 +159,7 @@ class CounterSerializer(serializers.ModelSerializer):
 class CounterWriteSerializer(serializers.ModelSerializer):
     branch = serializers.SlugRelatedField(slug_field="uuid", queryset=Branch.objects.all())
     operations = serializers.SlugRelatedField(
-        slug_field="uuid", queryset=Service.objects.all(), many=True, required=False
+        slug_field="uuid", queryset=Service.objects.filter(is_active=True), many=True, required=False
     )
 
     class Meta:

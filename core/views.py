@@ -7,7 +7,10 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.conf import settings as django_settings
 from django.db import transaction
-from django.db.models import Q
+from datetime import date, timedelta
+
+from django.db.models import Avg, Count, Q, Sum
+from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
@@ -926,7 +929,13 @@ class TicketViewSet(ModelViewSet):
         """
         ticket = self.get_object()
         if ticket.verification_data:
-            return Response({"status": True, "data": ticket.verification_data})
+            data = dict(ticket.verification_data)
+            if data.get("captured_image"):
+                from django.conf import settings as django_settings
+                data["captured_image"] = request.build_absolute_uri(
+                    f"{django_settings.MEDIA_URL}{data['captured_image']}"
+                )
+            return Response({"status": True, "data": data})
         return Response({"status": False, "data": None})
 
 
@@ -1069,3 +1078,226 @@ def _call_nia_api(image, card_number: str) -> tuple[bool, dict | None]:
     except Exception:
         logger.exception("NIA API call failed for card %s", card_number)
         return False, None
+
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+
+
+class ReportsView(APIView):
+    """
+    GET /core/reports/?action=<action>&branch=<uuid>&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
+
+    Supported actions: queue_summary, hourly_traffic, transactions,
+                       teller_performance, verification_stats
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    _ACTIONS = frozenset(
+        ["queue_summary", "hourly_traffic", "transactions", "teller_performance", "verification_stats"]
+    )
+
+    def get(self, request):
+        from configuration.models import Branch
+
+        action_name = request.query_params.get("action", "")
+        if action_name not in self._ACTIONS:
+            return Response(
+                {"detail": f"action must be one of: {', '.join(sorted(self._ACTIONS))}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        branch_uuid = request.query_params.get("branch")
+        if not branch_uuid:
+            return Response({"detail": "branch is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            branch = Branch.objects.get(uuid=branch_uuid)
+        except Branch.DoesNotExist:
+            return Response({"detail": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        today = date.today()
+        raw_from = request.query_params.get("date_from")
+        raw_to = request.query_params.get("date_to")
+        try:
+            date_from = date.fromisoformat(raw_from) if raw_from else today - timedelta(days=29)
+            date_to = date.fromisoformat(raw_to) if raw_to else today
+        except ValueError:
+            return Response({"detail": "date_from / date_to must be YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+        handler = getattr(self, f"_action_{action_name}")
+        return Response(handler(branch, date_from, date_to, request.query_params))
+
+    # ------------------------------------------------------------------
+    # action: queue_summary
+    # ------------------------------------------------------------------
+    def _action_queue_summary(self, branch, date_from, date_to, params):
+        qs = Ticket.objects.filter(branch=branch, created_at__date__range=[date_from, date_to])
+        total = qs.count()
+
+        status_counts = {
+            row["status"]: row["count"]
+            for row in qs.values("status").annotate(count=Count("id"))
+        }
+
+        averages = qs.aggregate(
+            avg_waiting_time=Avg("waiting_time"),
+            avg_served_time=Avg("served_time"),
+            avg_total_time_spent=Avg("total_time_spent"),
+        )
+
+        daily = list(
+            qs.annotate(day=TruncDate("created_at"))
+            .values("day")
+            .annotate(total=Count("id"), completed=Count("id", filter=Q(status=TicketStatus.COMPLETED)))
+            .order_by("day")
+            .values("day", "total", "completed")
+        )
+        for row in daily:
+            row["day"] = row["day"].isoformat()
+
+        return {
+            "total": total,
+            "status_counts": status_counts,
+            "averages": {k: round(v) if v is not None else None for k, v in averages.items()},
+            "daily": daily,
+        }
+
+    # ------------------------------------------------------------------
+    # action: hourly_traffic
+    # ------------------------------------------------------------------
+    def _action_hourly_traffic(self, branch, date_from, date_to, params):
+        raw_date = params.get("date")
+        try:
+            target_date = date.fromisoformat(raw_date) if raw_date else date.today()
+        except ValueError:
+            target_date = date.today()
+
+        qs = Ticket.objects.filter(branch=branch, created_at__date=target_date)
+        hourly = list(
+            qs.annotate(hour=ExtractHour("created_at"))
+            .values("hour")
+            .annotate(count=Count("id"))
+            .order_by("hour")
+        )
+        return {"date": target_date.isoformat(), "hourly": hourly}
+
+    # ------------------------------------------------------------------
+    # action: transactions
+    # ------------------------------------------------------------------
+    def _action_transactions(self, branch, date_from, date_to, params):
+        deposit_models = [
+            (CashDeposit, "Cash Deposit", True),
+            (ChequeDeposit, "Cheque Deposit", False),
+            (EZWICHDeposit, "EZWICH Deposit", True),
+            (MobileMoneyDeposit, "Mobile Money Deposit", True),
+        ]
+        summary = []
+        for Model, label, has_amount in deposit_models:
+            qs = Model.objects.filter(
+                ticket__branch=branch,
+                created_at__date__range=[date_from, date_to],
+            )
+            agg = qs.aggregate(
+                count=Count("id"),
+                committed=Count("id", filter=Q(t24_status=T24Status.COMMITTED)),
+                failed=Count("id", filter=Q(t24_status=T24Status.FAILED_COMMIT)),
+                pending=Count("id", filter=Q(t24_status=T24Status.PENDING)),
+                total_amount=Sum("amount") if has_amount else Count("id", filter=Q(id=None)),
+            )
+            if not has_amount:
+                agg["total_amount"] = None
+
+            daily = list(
+                qs.annotate(day=TruncDate("created_at"))
+                .values("day")
+                .annotate(count=Count("id"))
+                .order_by("day")
+                .values("day", "count")
+            )
+            for row in daily:
+                row["day"] = row["day"].isoformat()
+
+            summary.append(
+                {
+                    "type": label,
+                    "count": agg["count"],
+                    "total_amount": float(agg["total_amount"]) if agg["total_amount"] is not None else None,
+                    "committed": agg["committed"],
+                    "failed": agg["failed"],
+                    "pending": agg["pending"],
+                    "daily": daily,
+                }
+            )
+        return {"transactions": summary}
+
+    # ------------------------------------------------------------------
+    # action: teller_performance
+    # ------------------------------------------------------------------
+    def _action_teller_performance(self, branch, date_from, date_to, params):
+        qs = Ticket.objects.filter(
+            branch=branch,
+            created_at__date__range=[date_from, date_to],
+            servced_by__isnull=False,
+        )
+        rows = list(
+            qs.values("servced_by", "servced_by__first_name", "servced_by__last_name")
+            .annotate(
+                total=Count("id"),
+                completed=Count("id", filter=Q(status=TicketStatus.COMPLETED)),
+                avg_serve_time=Avg("served_time"),
+                avg_total_time=Avg("total_time_spent"),
+            )
+            .order_by("-total")
+        )
+        tellers = []
+        for row in rows:
+            first = row["servced_by__first_name"] or ""
+            last = row["servced_by__last_name"] or ""
+            tellers.append(
+                {
+                    "teller_uuid": str(row["servced_by"]),
+                    "name": f"{first} {last}".strip() or "Unknown",
+                    "total": row["total"],
+                    "completed": row["completed"],
+                    "avg_serve_time": round(row["avg_serve_time"]) if row["avg_serve_time"] else None,
+                    "avg_total_time": round(row["avg_total_time"]) if row["avg_total_time"] else None,
+                }
+            )
+        return {"tellers": tellers}
+
+    # ------------------------------------------------------------------
+    # action: verification_stats
+    # ------------------------------------------------------------------
+    def _action_verification_stats(self, branch, date_from, date_to, params):
+        card_qs = Ticket.objects.filter(
+            branch=branch,
+            created_at__date__range=[date_from, date_to],
+            id_type__iexact="ghana card",
+        )
+        total_card = card_qs.count()
+        verified_count = card_qs.filter(verification_data__verified=True).count()
+        simulated_count = card_qs.filter(verification_data__simulated=True).count()
+
+        daily = list(
+            card_qs.annotate(day=TruncDate("created_at"))
+            .values("day")
+            .annotate(
+                total=Count("id"),
+                verified=Count("id", filter=Q(verification_data__verified=True)),
+            )
+            .order_by("day")
+            .values("day", "total", "verified")
+        )
+        for row in daily:
+            row["day"] = row["day"].isoformat()
+
+        return {
+            "total_card_tickets": total_card,
+            "verified": verified_count,
+            "simulated": simulated_count,
+            "verification_rate": round(verified_count / total_card * 100, 1) if total_card else 0,
+            "daily": daily,
+        }

@@ -2,7 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from configuration.models import Branch, Device, ServiceTypes
+from configuration.models import Branch, Device, Service, ServiceTypes
 from .models import (
     CashDeposit,
     ChequeDeposit,
@@ -13,13 +13,20 @@ from .models import (
 )
 
 _VALID_SERVICE_TYPES = set(ServiceTypes.values)
-_SERVICE_TYPE_LABELS = dict(
-    ServiceTypes.choices
-)  # {"CASH DEPOSIT": "Cash Deposit", ...}
+_SERVICE_TYPE_LABELS = dict(ServiceTypes.choices)
 
 
 def _next_ticket_number(branch, lead_service_type):
-    prefix = (lead_service_type[0] if lead_service_type else "T").upper()
+    # Use configured prefix if set, otherwise fall back to first letter of service type
+    configured = (
+        Service.objects.filter(name=lead_service_type)
+        .values_list("prefix", flat=True)
+        .first()
+    )
+    if configured:
+        prefix = configured.upper()
+    else:
+        prefix = (lead_service_type[0] if lead_service_type else "T").upper()
     today = timezone.now().date()
     count = Ticket.objects.filter(branch=branch, created_at__date=today).count() + 1
     return f"{prefix}{count:03d}"
@@ -140,6 +147,9 @@ def _attach_verification(ticket: Ticket, verification_uuid) -> None:
         record = Verification.objects.get(uuid=verification_uuid)
         ticket.verification_data = {
             "verified": record.verified,
+            # Store the image name so the verification endpoint can build an
+            # absolute URL at request time (avoids hard-coding the host here).
+            "captured_image": record.image.name if record.image else None,
             **(record.data or {}),
         }
         ticket.save(update_fields=["verification_data"])
@@ -200,7 +210,7 @@ class TicketSerializer(serializers.ModelSerializer):
         return [
             {
                 **item,
-                "service_name": _SERVICE_TYPE_LABELS.get(item.get("service_type"), ""),
+                "service_name": _SERVICE_TYPE_LABELS.get(item.get("service_type"), item.get("service_type", "")),
                 "position": i,
             }
             for i, item in enumerate(obj.services_data)

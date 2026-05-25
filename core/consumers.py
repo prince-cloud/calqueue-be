@@ -35,6 +35,7 @@ class QueueConsumer(AsyncWebsocketConsumer):
     def _authenticate(self, token: str) -> bool:
         if not token:
             return False
+        from rest_framework_simplejwt.exceptions import TokenError
         try:
             from rest_framework_simplejwt.tokens import AccessToken
             from accounts.models import CustomUser
@@ -43,5 +44,20 @@ class QueueConsumer(AsyncWebsocketConsumer):
             return CustomUser.objects.filter(
                 id=validated["user_id"], is_active=True
             ).exists()
-        except Exception:
-            return False
+        except TokenError:
+            pass
+        try:
+            from configuration.tokens import DeviceAccessToken
+            from configuration.models import Device
+            from django.core.cache import cache
+
+            validated = DeviceAccessToken(token)
+            jti = validated.get("jti")
+            if jti and cache.get(f"device-token-blacklist/{jti}"):
+                return False
+            return Device.objects.filter(
+                device_id=validated["device_id"], is_active=True
+            ).exists()
+        except TokenError:
+            pass
+        return False

@@ -23,4 +23,5 @@ urlpatterns = router.urls + [
         views.GhanaCardVerificationView.as_view(),
         name="ghana-card-verification",
     ),
+    path("reports/", views.ReportsView.as_view(), name="reports"),
 ]

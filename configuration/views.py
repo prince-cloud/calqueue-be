@@ -167,16 +167,17 @@ class DeviceViewSet(ModelViewSet):
 
 
 class MainServiceViewSet(ModelViewSet):
-    queryset = (
-        MainService.objects.filter(is_active=True)
-        .prefetch_related("services")
-        .order_by("created_at")
-    )
     serializer_class = MainServiceSerializer
     filterset_class = MainServiceFilter
     search_fields = ("name",)
     ordering_fields = ("name", "created_at")
     lookup_field = "uuid"
+
+    def get_queryset(self):
+        qs = MainService.objects.prefetch_related("services").order_by("created_at")
+        if isinstance(self.request.user, Device):
+            qs = qs.filter(is_active=True)
+        return qs
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
@@ -185,15 +186,16 @@ class MainServiceViewSet(ModelViewSet):
 
 
 class ServiceViewSet(ModelViewSet):
-    queryset = (
-        Service.objects.filter(is_active=True)
-        .select_related("main_service")
-        .order_by("name")
-    )
     filterset_class = ServiceFilter
     search_fields = ("name",)
     ordering_fields = ("name", "created_at")
     lookup_field = "uuid"
+
+    def get_queryset(self):
+        qs = Service.objects.select_related("main_service").order_by("name")
+        if isinstance(self.request.user, Device):
+            qs = qs.filter(is_active=True)
+        return qs
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):

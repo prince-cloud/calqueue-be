@@ -211,6 +211,12 @@ class Service(models.Model):
         MainService, related_name="services", on_delete=models.SET_NULL, null=True
     )
     name = models.CharField(choices=ServiceTypes.choices, unique=True, max_length=50)
+    prefix = models.CharField(
+        max_length=6,
+        blank=True,
+        default="",
+        help_text="Ticket number prefix for this service",
+    )
     icon = models.FileField(upload_to="services/", null=True, blank=True)
     description = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)

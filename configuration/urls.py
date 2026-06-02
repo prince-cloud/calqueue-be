@@ -11,6 +11,8 @@ router.register("devices", views.DeviceViewSet, basename="device")
 router.register("main-services", views.MainServiceViewSet, basename="main-service")
 router.register("services", views.ServiceViewSet, basename="service")
 router.register("counters", views.CounterViewSet, basename="counter")
+router.register("other-banks", views.OtherBankViewSet, basename="other-bank")
+router.register("other-bank-branches", views.OtherBankBranchViewSet, basename="other-bank-branch")
 
 urlpatterns = [
     path("device/login/", views.DeviceLoginView.as_view(), name="device-login"),

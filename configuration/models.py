@@ -243,6 +243,49 @@ auditlog.register(Service)
 
 
 # ---------------------------------------------------------------------------
+# Other Bank
+# ---------------------------------------------------------------------------
+
+
+class OtherBank(models.Model):
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=20, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "Other Bank"
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class OtherBankBranch(models.Model):
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    bank = models.ForeignKey(OtherBank, on_delete=models.CASCADE, related_name="branches")
+    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=20, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["bank", "name"]
+        unique_together = ("bank", "code")
+        verbose_name = "Other Bank Branch"
+
+    def __str__(self):
+        return f"{self.bank.code} — {self.name} ({self.code})"
+
+
+auditlog.register(OtherBank)
+auditlog.register(OtherBankBranch)
+
+
+# ---------------------------------------------------------------------------
 # Counter
 # ---------------------------------------------------------------------------
 

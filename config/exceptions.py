@@ -74,6 +74,21 @@ def custom_exception_handler(exception: Exception, context):
         if response:
             response.data["errorCode"] = code
             response.data["errorMsg"] = details
+            if 400 <= response.status_code < 500:
+                request = context.get("request") if context else None
+                if request:
+                    client_ip = (
+                        request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
+                        or request.META.get("REMOTE_ADDR", "-")
+                    )
+                    logger.warning(
+                        "%s %s %d [%s] errors=%s",
+                        request.method,
+                        request.path,
+                        response.status_code,
+                        client_ip,
+                        response.data,
+                    )
             return response
 
     data = {

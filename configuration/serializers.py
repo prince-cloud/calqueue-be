@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.core.cache import cache
 from django.utils import timezone
 from helpers import exceptions
-from .models import Branch, BranchWorkingHours, Device, MainService, Service, Counter, SystemVoiceConfig, BranchVoiceConfig, BranchTVConfig, TVAdvertisement
+from .models import Branch, BranchWorkingHours, Device, MainService, Service, Counter, SystemVoiceConfig, BranchVoiceConfig, BranchTVConfig, TVAdvertisement, OtherBank, OtherBankBranch
 
 
 class BranchWorkingHoursSerializer(serializers.ModelSerializer):
@@ -225,6 +225,35 @@ class TVAdvertisementWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = TVAdvertisement
         fields = ("media_type", "file", "order")
+
+
+class OtherBankBranchSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OtherBankBranch
+        fields = ("uuid", "name", "code", "is_active")
+
+
+class OtherBankSerializer(serializers.ModelSerializer):
+    branches = OtherBankBranchSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = OtherBank
+        fields = ("uuid", "name", "code", "is_active", "branches")
+
+
+class OtherBankWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OtherBank
+        fields = ("name", "code", "is_active")
+
+
+class OtherBankBranchWriteSerializer(serializers.ModelSerializer):
+    bank = serializers.SlugRelatedField(slug_field="uuid", queryset=OtherBank.objects.all())
+    code = serializers.CharField(required=False, allow_blank=True, default="")
+
+    class Meta:
+        model = OtherBankBranch
+        fields = ("bank", "name", "code", "is_active")
 
 
 class BranchTVConfigSerializer(serializers.ModelSerializer):

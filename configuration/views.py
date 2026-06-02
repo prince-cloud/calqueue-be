@@ -10,12 +10,16 @@ from rest_framework_simplejwt.exceptions import TokenError
 from accounts.permissions import IsSystemUser, ModelPermissions
 from helpers import exceptions
 from .filters import BranchFilter, CounterFilter, DeviceFilter, MainServiceFilter, ServiceFilter
-from .models import Branch, Device, MainService, Service, Counter, SystemVoiceConfig, BranchVoiceConfig, BranchTVConfig, TVAdvertisement
+from .models import Branch, Device, MainService, Service, Counter, SystemVoiceConfig, BranchVoiceConfig, BranchTVConfig, TVAdvertisement, OtherBank, OtherBankBranch
 from .permissions import IsDevice
 from rest_framework.parsers import MultiPartParser, JSONParser, FormParser
 from .serializers import (
     BranchSerializer,
     BranchTVConfigSerializer,
+    OtherBankSerializer,
+    OtherBankWriteSerializer,
+    OtherBankBranchSerializer,
+    OtherBankBranchWriteSerializer,
     BranchVoiceConfigSerializer,
     BranchWriteSerializer,
     CounterSerializer,
@@ -430,3 +434,67 @@ class BranchTVAdsView(APIView):
             ad.order = int(order)
             ad.save(update_fields=["order"])
         return Response(TVAdvertisementSerializer(ad, context={"request": request}).data)
+
+
+class OtherBankViewSet(ModelViewSet):
+    queryset = OtherBank.objects.prefetch_related("branches").order_by("name")
+    lookup_field = "uuid"
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [(IsSystemUser | IsDevice)()]
+        return [ModelPermissions()]
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return OtherBankWriteSerializer
+        return OtherBankSerializer
+
+    def create(self, request, *args, **kwargs):
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(OtherBankSerializer(instance).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        write_serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(OtherBankSerializer(instance).data)
+
+
+class OtherBankBranchViewSet(ModelViewSet):
+    lookup_field = "uuid"
+
+    def get_queryset(self):
+        qs = OtherBankBranch.objects.select_related("bank").order_by("bank__name", "name")
+        bank_uuid = self.request.query_params.get("bank")
+        if bank_uuid:
+            qs = qs.filter(bank__uuid=bank_uuid)
+        return qs
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [(IsSystemUser | IsDevice)()]
+        return [ModelPermissions()]
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return OtherBankBranchWriteSerializer
+        return OtherBankBranchSerializer
+
+    def create(self, request, *args, **kwargs):
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(OtherBankBranchSerializer(instance).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        write_serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        write_serializer.is_valid(raise_exception=True)
+        instance = write_serializer.save()
+        return Response(OtherBankBranchSerializer(instance).data)

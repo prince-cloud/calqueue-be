@@ -15,6 +15,9 @@ router.register("other-banks", views.OtherBankViewSet, basename="other-bank")
 router.register("other-bank-branches", views.OtherBankBranchViewSet, basename="other-bank-branch")
 
 urlpatterns = [
+    # Mobile customer-app endpoints (additive, read-only)
+    path("mobile/branches/nearest/", views.NearestBranchView.as_view(), name="mobile-nearest-branch"),
+    path("mobile/services/", views.MobileServiceCatalogueView.as_view(), name="mobile-services"),
     path("device/login/", views.DeviceLoginView.as_view(), name="device-login"),
     path("device/logout/", views.DeviceLogoutView.as_view(), name="device-logout"),
     path("device/token/refresh/", views.DeviceTokenRefreshView.as_view(), name="device-token-refresh"),

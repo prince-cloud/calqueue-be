@@ -19,6 +19,11 @@ router.register(
 
 urlpatterns = router.urls + [
     path(
+        "mobile/tickets/",
+        views.MobileTicketCreateView.as_view(),
+        name="mobile-ticket-create",
+    ),
+    path(
         "verification/ghana-card/",
         views.GhanaCardVerificationView.as_view(),
         name="ghana-card-verification",

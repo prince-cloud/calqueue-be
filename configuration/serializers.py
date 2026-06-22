@@ -29,6 +29,17 @@ class BranchSerializer(serializers.ModelSerializer):
         )
 
 
+class NearestBranchSerializer(BranchSerializer):
+    """Branch payload for the mobile check-in flow, with computed distance.
+    Expects ``distance_km`` / ``distance_m`` attached to each instance."""
+
+    distance_km = serializers.FloatField(read_only=True)
+    distance_m = serializers.FloatField(read_only=True)
+
+    class Meta(BranchSerializer.Meta):
+        fields = BranchSerializer.Meta.fields + ("distance_km", "distance_m")
+
+
 class DeviceSerializer(serializers.ModelSerializer):
     branch = BranchSerializer(read_only=True)
 

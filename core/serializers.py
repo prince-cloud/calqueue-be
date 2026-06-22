@@ -133,6 +133,49 @@ class TicketWriteSerializer(serializers.Serializer):
         return ticket
 
 
+class MobileTicketWriteSerializer(serializers.Serializer):
+    """
+    Branch-based ticket creation for the mobile customer app. Mirrors
+    TicketWriteSerializer but takes a branch (the customer's checked-in branch)
+    instead of a device. Leaves TicketViewSet / TicketWriteSerializer untouched.
+    """
+
+    branch = serializers.UUIDField()
+    phone_number = serializers.CharField(max_length=20)
+    id_number = serializers.CharField(max_length=50)
+    id_type = serializers.CharField(max_length=50)
+    services = _ServicesField()
+    verification_uuid = serializers.UUIDField(required=False, allow_null=True)
+
+    def validate_branch(self, value):
+        try:
+            return Branch.objects.get(uuid=value, is_active=True)
+        except Branch.DoesNotExist:
+            raise serializers.ValidationError("Branch not found or inactive.")
+
+    @transaction.atomic
+    def create(self, validated_data):
+        service_items = validated_data.pop("services")
+        branch = validated_data.pop("branch")
+        verification_uuid = validated_data.pop("verification_uuid", None)
+
+        # Lock the branch row so concurrent ticket creations for the same
+        # branch queue behind each other, preventing duplicate ticket numbers.
+        branch = Branch.objects.select_for_update().get(pk=branch.pk)
+
+        ticket = Ticket.objects.create(
+            branch=branch,
+            device=None,
+            ticket_number=_next_ticket_number(branch, service_items[0]["service_type"]),
+            services_data=service_items,
+            **validated_data,
+        )
+
+        _attach_verification(ticket, verification_uuid)
+
+        return ticket
+
+
 def _attach_verification(ticket: Ticket, verification_uuid) -> None:
     """
     Look up the Verification record by its UUID and copy the result onto the

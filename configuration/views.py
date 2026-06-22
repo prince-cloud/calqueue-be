@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.db.models import Prefetch
 from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.generics import CreateAPIView
@@ -10,12 +11,14 @@ from rest_framework_simplejwt.exceptions import TokenError
 from accounts.permissions import IsSystemUser, ModelPermissions
 from helpers import exceptions
 from .filters import BranchFilter, CounterFilter, DeviceFilter, MainServiceFilter, ServiceFilter
+from .geo import haversine_km
 from .models import Branch, Device, MainService, Service, Counter, SystemVoiceConfig, BranchVoiceConfig, BranchTVConfig, TVAdvertisement, OtherBank, OtherBankBranch
 from .permissions import IsDevice
 from rest_framework.parsers import MultiPartParser, JSONParser, FormParser
 from .serializers import (
     BranchSerializer,
     BranchTVConfigSerializer,
+    NearestBranchSerializer,
     OtherBankSerializer,
     OtherBankWriteSerializer,
     OtherBankBranchSerializer,
@@ -498,3 +501,90 @@ class OtherBankBranchViewSet(ModelViewSet):
         write_serializer.is_valid(raise_exception=True)
         instance = write_serializer.save()
         return Response(OtherBankBranchSerializer(instance).data)
+
+
+# ---------------------------------------------------------------------------
+# Mobile customer-app endpoints (additive, read-only, public)
+# ---------------------------------------------------------------------------
+
+
+class NearestBranchView(APIView):
+    """
+    GET /configuration/mobile/branches/nearest/?latitude=&longitude=&radius=
+
+    Returns active branches within ``radius`` kilometres of the supplied
+    coordinates, nearest first. ``radius`` defaults to 0.01 km (10 m) so a
+    customer must be physically at the branch to check in.
+    """
+
+    permission_classes = (permissions.AllowAny,)
+    DEFAULT_RADIUS_KM = 0.01
+
+    def _parse_float(self, value, label):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise exceptions.GeneralException(detail=f"{label} must be a valid number.")
+
+    def get(self, request):
+        lat = request.query_params.get("latitude")
+        lng = request.query_params.get("longitude")
+        if lat is None or lng is None:
+            raise exceptions.GeneralException(
+                detail="latitude and longitude query parameters are required."
+            )
+        latitude = self._parse_float(lat, "latitude")
+        longitude = self._parse_float(lng, "longitude")
+
+        radius_raw = request.query_params.get("radius")
+        radius_km = (
+            self._parse_float(radius_raw, "radius")
+            if radius_raw is not None
+            else self.DEFAULT_RADIUS_KM
+        )
+
+        branches = Branch.objects.filter(
+            is_active=True, latitude__isnull=False, longitude__isnull=False
+        ).prefetch_related("working_hours")
+
+        nearby = []
+        for branch in branches:
+            distance = haversine_km(
+                latitude, longitude, float(branch.latitude), float(branch.longitude)
+            )
+            if distance <= radius_km:
+                branch.distance_km = round(distance, 4)
+                branch.distance_m = round(distance * 1000, 1)
+                nearby.append(branch)
+
+        nearby.sort(key=lambda b: b.distance_km)
+        serializer = NearestBranchSerializer(
+            nearby, many=True, context={"request": request}
+        )
+        return Response(serializer.data)
+
+
+class MobileServiceCatalogueView(APIView):
+    """
+    GET /configuration/mobile/services/
+
+    Active service catalogue for the customer app: active main services, each
+    with their active services nested.
+    """
+
+    permission_classes = (permissions.AllowAny,)
+
+    # Main services not offered in the mobile app.
+    EXCLUDED = ("TRANSFER",)
+
+    def get(self, request):
+        qs = (
+            MainService.objects.filter(is_active=True)
+            .exclude(name__in=self.EXCLUDED)
+            .prefetch_related(
+                Prefetch("services", queryset=Service.objects.filter(is_active=True))
+            )
+            .order_by("created_at")
+        )
+        serializer = MainServiceSerializer(qs, many=True, context={"request": request})
+        return Response(serializer.data)

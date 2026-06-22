@@ -101,6 +101,7 @@ from .serializers import (
     ChequeDepositSerializer,
     EZWICHDepositSerializer,
     MobileMoneyDepositSerializer,
+    MobileTicketWriteSerializer,
     TicketWriteSerializer,
     TicketSerializer,
 )
@@ -1301,3 +1302,28 @@ class ReportsView(APIView):
             "verification_rate": round(verified_count / total_card * 100, 1) if total_card else 0,
             "daily": daily,
         }
+
+
+# ---------------------------------------------------------------------------
+# Mobile customer-app ticket creation (additive, branch-based, public)
+# ---------------------------------------------------------------------------
+
+
+class MobileTicketCreateView(APIView):
+    """
+    POST /core/mobile/tickets/
+
+    Creates a queue ticket from the mobile customer app using the checked-in
+    branch (no device). Leaves the device-based /core/tickets/ untouched.
+    """
+
+    permission_classes = (AllowAny,)
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def post(self, request):
+        s = MobileTicketWriteSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        ticket = s.save()
+        data = TicketSerializer(ticket, context={"request": request}).data
+        _broadcast_queue(str(ticket.branch.uuid), "ticket.created", data)
+        return Response(data, status=status.HTTP_201_CREATED)

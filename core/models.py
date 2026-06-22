@@ -88,7 +88,9 @@ class Ticket(models.Model):
         Device,
         related_name="tickets_created",
         on_delete=models.PROTECT,
-        help_text="Kiosk / device that issued the ticket.",
+        null=True,
+        blank=True,
+        help_text="Kiosk / device that issued the ticket. Null for mobile check-in.",
     )
 
     phone_number = models.CharField(max_length=20)
